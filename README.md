@@ -4,7 +4,7 @@
 
 给已有产品加一个功能，不必先重做整套界面。把现有截图或 HTML 放进来，用自然语言补上本次改动，再把入口、操作、结果和关键分支连成完整流程。
 
-**[立即体验原型](https://jasperlin2333.github.io/yuanxing/demo/prototype.html) · [查看流程画布](https://jasperlin2333.github.io/yuanxing/demo/review.html) · [开始使用](#start) · [下载离线包](https://github.com/JasperLin2333/yuanxing/releases/latest)**
+**[立即体验原型](https://jasperlin2333.github.io/yuanxing/demo/prototype.html) · [查看流程画布](https://jasperlin2333.github.io/yuanxing/demo/review.html) · [产品介绍](https://jasperlin2333.github.io/yuanxing/) · [开始使用](#start) · [下载离线包](https://github.com/JasperLin2333/yuanxing/releases/latest)**
 
 ![元形工作方式：保留旧页面，生成新交互，在同一份设计中评审流程和体验原型](assets/readme-flow.svg)
 
@@ -59,7 +59,17 @@
 
 > 使用元形。基于这张已有客户列表，只设计“分配客户”这次改动，保留其他区域。把管理员和普通成员的流程放到画布上，并导出能独立体验的原型。
 
-### 方式二：先在本地跑一个案例
+### 方式二：用 skills CLI 安装
+
+在你准备设计原型的项目目录运行，按提示选择当前使用的 AI 助手：
+
+```sh
+npx skills add JasperLin2333/yuanxing --skill yuanxing
+```
+
+这条命令由 [Vercel 的开源 skills CLI](https://github.com/vercel-labs/skills) 提供。安装后，告诉你的 AI 助手“使用元形”，再提供已有界面和本次需求。它会保留 Skill 随包的运行时、示例与资源。
+
+### 方式三：先在本地跑一个案例
 
 ```sh
 git clone https://github.com/JasperLin2333/yuanxing.git
