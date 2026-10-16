@@ -91,3 +91,42 @@ node "<Skill目录>/scripts/yuanxing.mjs" export --root "<项目目录>" --view 
 ```
 
 `add` 复制输入并内嵌直接资源，不改输入原件。PNG 可读取原尺寸；JPEG / WebP 需显式给出宽高。命令通过文件版本核对保存；外部修改冲突时停止，重新读取后再落实当前范围。
+
+## 项目扩展
+
+通用工作台只维护 `runtime/` 一份实现。项目自己的页面、数据和专用交互放在项目目录，通过启动参数加载扩展；不复制或修改另一份工作台内核。普通项目无需扩展。
+
+```sh
+node scripts/yuanxing.mjs serve --root ./my-project --extension ./my-project/extension --open
+node scripts/yuanxing.mjs export --root ./my-project --extension ./my-project/extension --view review
+```
+
+扩展目录用 `extension.json` 列出依赖与入口，顺序为依赖在前、入口最后：
+
+```json
+{
+  "entry": "index.mjs",
+  "files": ["state.mjs", "index.mjs"],
+  "declarative": true
+}
+```
+
+入口导出 `createProjectExtension(host)`，不依赖工作台文件的私有变量。`host` 提供 `getState`、`node`、`openNode`、`measure`、`visibleRect`、`renderOverlays`、`renderInspector` 与 `download`。`getState()` 返回当前模型、页面、iframe、交互模式、缩放和节点，回调执行时应重新读取当前状态。
+
+可返回的扩展钩子：
+
+| 属性或函数 | 用途 |
+| --- | --- |
+| `declarative: true` | 使用禁止页面脚本的声明式页面，与清单中的设置保持一致 |
+| `styles` | 扩展的控件样式 |
+| `bindHotspots: false` | 项目自行维护控件绑定时，收起通用点击区域编辑入口 |
+| `layout(doc, node)` / `mount(doc, node)` | 排版缩略图、挂载打开后的页面 |
+| `outgoing(edges, doc, id)` | 合并项目声明的页面操作 |
+| `travel(edge)` | 处理扩展操作；返回 `true` 表示已处理 |
+| `renderOverlays(info, renderHotspots)` | 绘制项目表单或局部控件，调用 `renderHotspots()` 复用通用热点 |
+| `decorateHotspot(button, edges, frame)` / `bindStage({stage})` | 补充按住、滚动等项目交互 |
+| `skipMeasurement(element)` | 跳过项目暂时隐藏的控件 |
+
+扩展仅在明确指定后加载，浏览器只可读取清单内的脚本。依赖必须使用相对导入并按清单顺序列出，不支持动态导入。导出项目时，指定的扩展会与通用内核一起内嵌；普通导出和 Skill 安装包不会自动携带其他项目的扩展或数据。
+
+已有项目使用 Python 组装固定状态时，可加 `--builder scripts/build.py`；导出检查脚本可通过 `--validator scripts/check.py` 指定，校验时会带上 `--validate`。脚本路径相对项目根目录。

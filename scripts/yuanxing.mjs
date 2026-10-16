@@ -20,6 +20,7 @@ node scripts/yuanxing.mjs export --root <目录> --view review|prototype [--modu
 
 --rect 使用 0～1 的相对坐标。只表达画布关系时使用 --diagram。
 HTML 支持本地 CSS、图片和普通 JavaScript；外部服务与工程模块需先适配。
+serve / export / check 可加 --extension <扩展目录>、--builder <项目内Python脚本>、--validator <项目内校验脚本>。
 `;
 
 function options(args){
@@ -35,7 +36,7 @@ function identifier(value){if(!/^[a-zA-Z][\w-]*$/.test(value))throw new Error('�
 async function exists(target){try{await fs.lstat(target);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}}
 function sameOrInside(root,target){return target===root||target.startsWith(root+path.sep);}
 
-export async function run(args){
+export async function run(args,{sessionToken}={}){
   const [command,...rest]=args;
   if(!command||['help','--help','-h'].includes(command)){console.log(help);return;}
   const flags=options(rest);
@@ -51,24 +52,24 @@ export async function run(args){
     if(template==='iteration'&&flags.name){const file=path.join(root,'artifact/workbench.json'),model=JSON.parse(await fs.readFile(file,'utf8'));model.title=flags.name;await fs.writeFile(file,JSON.stringify(model,null,2)+'\n');}
     console.log(`已创建 ${root}`);return;
   }
-  const root=path.resolve(required(flags,'root')),store=await createStore(root);
+  const root=path.resolve(required(flags,'root')),store=await createStore(root,{builder:flags.builder,validator:flags.validator,extension:flags.extension});
   if(command==='serve'){
     const port=Number(flags.port||4318);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('端口应为 1～65535');
-    await serve(root,{port,open:!!flags.open});return;
+    await serve(root,{port,open:!!flags.open,builder:flags.builder,validator:flags.validator,extension:flags.extension,sessionToken});return;
   }
   if(command==='check'){
-    const bundle=await store.load(),errors=exportIssues(bundle.model);if(errors.length)throw new Error(errors.join('；'));
+    await store.check();const bundle=await store.load(),errors=exportIssues(bundle.model);if(errors.length)throw new Error(errors.join('；'));
     console.log(`结构与资源检查通过：${bundle.model.nodes.length} 个页面，${bundle.model.edges.length} 条关系`);return;
   }
   if(command==='export'){
-    const view=flags.view||'review';if(!['review','prototype'].includes(view))throw new Error('视图应为 review 或 prototype');
+    await store.check();const view=flags.view||'review';if(!['review','prototype'].includes(view))throw new Error('视图应为 review 或 prototype');
     const bundle=await store.load();
     if(flags.module&&!bundle.model.modules.some(m=>m.id===flags.module))throw new Error('模块不存在');
     if(flags.flow&&!bundle.model.flows?.some(flow=>flow.id===flags.flow))throw new Error('体验流程不存在');
     const out=path.resolve(flags.out||path.join(root,'dist',view==='prototype'?'prototype.html':'workbench.html'));
     if(sameOrInside(path.join(root,'artifact'),out)||!out.toLowerCase().endsWith('.html'))throw new Error('导出应为 artifact 目录以外的 HTML 文件');
     if(await exists(out)){const stat=await fs.lstat(out);if(stat.isSymbolicLink()||!stat.isFile()||!flags.replace)throw new Error('输出已存在；确认是生成文件后使用 --replace');}
-    const html=await standalone(bundle,{module:flags.module,entryModule:flags.module,view,flow:flags.flow});
+    const html=await standalone(bundle,{module:flags.module,entryModule:flags.module,view,flow:flags.flow,extension:store.extension});
     await fs.mkdir(path.dirname(out),{recursive:true});await fs.writeFile(out,html,{flag:flags.replace?'w':'wx'});
     console.log(`已生成 ${out}`);return;
   }

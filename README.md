@@ -70,7 +70,7 @@ node scripts/yuanxing.mjs serve --root ./my-iteration --open
 
 打开后可以拖动页面、整理连线、绑定点击区域、打点批注。顶栏点击「完整原型」即可从流程入口连续体验；点击「流程画布」或按 Esc 返回，保留原来的画布位置与缩放。你的 AI 助手可直接读取 [SKILL.md](SKILL.md)，继续修改 `my-iteration` 中的页面与流程。
 
-手动安装到现有 AI 宿主的命令见下文。
+手动安装到现有 AI 宿主的命令见下文。操作细节见[工作台手册](references/workbench.md)。
 
 ## 一份设计，两种交付
 
@@ -130,5 +130,7 @@ npm test
 npm run check
 npm run build:demo
 ```
+
+通用工作台统一维护在 `runtime/`。项目页面、数据与专用交互可以独立保存，通过显式的项目扩展接入同一个内核，启动和离线导出使用相同实现。扩展接口见[项目格式说明](references/project-format.md#项目扩展)。
 
 欢迎在 [Issues](https://github.com/JasperLin2333/yuanxing/issues) 分享你要设计的具体场景、使用问题或改进建议。主代码采用 [MIT](LICENSE) 许可证，附带连线组件的来源和许可证见[第三方说明](THIRD_PARTY_NOTICES.md)。
