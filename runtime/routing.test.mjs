@@ -49,8 +49,8 @@ test('单文件仅内嵌布线引擎并可独立执行，导出数据和路径�
 
 test('本地接口提供固定依赖路径，不能借依赖入口读取其他文件',async()=>{
   const handler=createHandler({},'token');
-  for(const url of ['/routing.mjs','/vendor/libavoid.min.js','/vendor/libavoid-routing.js']){const req={method:'GET',url,headers:{host:'127.0.0.1:4318'}},res={writeHead(status){this.status=status;},end(text){this.text=text;}};await handler(req,res);assert.equal(res.status,200);assert.ok(res.text.length>100);}
-  const req={method:'GET',url:'/vendor/../../AGENTS.md',headers:{host:'127.0.0.1:4318'}},res={writeHead(status){this.status=status;},end(){}};await handler(req,res);assert.equal(res.status,404);
+  for(const url of ['/routing.mjs','/libavoid.min.js','/libavoid-routing.js']){const req={method:'GET',url,headers:{host:'127.0.0.1:4318'}},res={writeHead(status){this.status=status;},end(text){this.text=text;}};await handler(req,res);assert.equal(res.status,200);assert.ok(res.text.length>100);}
+  const req={method:'GET',url:'/../../AGENTS.md',headers:{host:'127.0.0.1:4318'}},res={writeHead(status){this.status=status;},end(){}};await handler(req,res);assert.equal(res.status,404);
 });
 
 

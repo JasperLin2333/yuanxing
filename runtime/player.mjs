@@ -7,17 +7,45 @@ export function cleanContext(value) {
 }
 
 export function flowEntries(model) {
-  if (model.flows?.length) return model.flows.filter(flow => model.nodes.some(node => node.id === flow.entry));
-  return model.modules.map(module => ({
-    id: module.id, title: module.title,
-    entry: model.nodes.some(node => node.id === module.entry) ? module.entry : model.nodes.find(node => node.module === module.id && node.kind !== 'note' && node.overview !== false)?.id
-  })).filter(flow => flow.entry);
+  const playable=node=>node&&node.kind!=='note';
+  const explicit=model.experiences?.length?model.experiences:model.flows;
+  if (explicit?.length) return explicit.filter(flow => playable(model.nodes.find(node => node.id === flow.entry)));
+  const module=model.modules.find(item=>item.id===model.entryModule)||model.modules[0];
+  const entry=model.nodes.find(node=>node.id===module?.entry&&playable(node))||model.nodes.find(node=>node.module===module?.id&&node.overview!==false&&playable(node))||model.nodes.find(node=>node.overview!==false&&playable(node));
+  return entry?[{id:'product',title:model.title||'完整原型',entry:entry.id}]:[];
+}
+
+// 缩略预览分帧挂载，取消离屏任务，不让回收站同时创建大量 iframe。
+export function createPreviewQueue({request,cancel,batch=3}){
+  const jobs=new Map();let frame=null;
+  const tick=()=>{frame=null;for(const key of [...jobs.keys()].slice(0,batch)){const run=jobs.get(key);jobs.delete(key);run();}if(jobs.size)frame=request(tick);};
+  return {add(key,run){jobs.set(key,run);if(frame===null)frame=request(tick);},remove(key){jobs.delete(key);},clear(){jobs.clear();if(frame!==null)cancel(frame);frame=null;}};
 }
 
 export function thumbnailHTML(html) {
   return html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
     .replace(/<meta\b[^>]*http-equiv\s*=\s*["']?(?:refresh|content-security-policy)\b[^>]*>/gi, '').replace(/<base\b[^>]*>/gi, '')
     .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+}
+
+// 声明式扩展在真实页面 DOM 上处理操作，不以父页面的透明控件覆盖产品。
+export function bindNativeDocument(doc,{getEdges,follow,onInput,onKeyDown}){
+  doc.addEventListener('click',event=>{
+    const target=event.target?.closest?.('button,input,select,textarea,a,[role="button"],[contenteditable="true"]');
+    if(target?.disabled||target?.getAttribute?.('aria-disabled')==='true')return;
+    const matches=[];
+    for(const edge of getEdges())if(edge.selector){try{const element=event.target.closest(edge.selector);if(element)matches.push({edge,element});}catch{/* 忽略已失效的选择器，交由项目检查报告。 */}}
+    if(!matches.length)return;
+    const nearest=matches.reduce((a,b)=>a.element.contains(b.element)?b:a).element;
+    if(nearest.disabled||nearest.getAttribute?.('aria-disabled')==='true')return;
+    const form=nearest.closest?.('form');
+    if(nearest.type==='submit'&&form&&!form.checkValidity()){event.preventDefault();form.reportValidity();return;}
+    event.preventDefault();follow(matches.filter(item=>item.element===nearest).map(item=>item.edge));
+  });
+  doc.addEventListener('submit',event=>event.preventDefault());
+  doc.addEventListener('input',event=>onInput?.(event,'input'));
+  doc.addEventListener('change',event=>onInput?.(event,'change'));
+  doc.addEventListener('keydown',event=>onKeyDown?.(event));
 }
 
 // 此函数会内嵌到原型页面，不引用模块内变量。

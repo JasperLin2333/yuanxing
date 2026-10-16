@@ -4,25 +4,25 @@ import {promises as fs} from 'node:fs';
 import vm from 'node:vm';
 const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8');
 const player=await fs.readFile(new URL('../runtime/player.mjs',import.meta.url),'utf8');
-const entries=app.includes('function flowEntries(model){')?app.slice(app.indexOf('function flowEntries(model){'),app.indexOf('function renderExperience(){')):player.slice(player.indexOf('export function flowEntries('),player.indexOf('export function thumbnailHTML(')).replace('export ','');
+const entries=app.includes('function flowEntries(model){')?app.slice(app.indexOf('function flowEntries(model){'),app.indexOf('function renderExperience(){')):player.slice(player.indexOf('export function flowEntries('),player.indexOf('export function thumbnailHTML(')).replaceAll('export ','');
 const controller=app.slice(app.indexOf('function renderExperience(){'),app.indexOf('function capturePoint('));
 const clone=value=>JSON.parse(JSON.stringify(value));
 function setup(originalReadonly=false){
   const elements=new Map(),classes=new Set(),stored=[];
   const element=()=>({hidden:false,disabled:false,attrs:{},dataset:{},children:[],replaceChildren(){this.children=[];},append(child){this.children.push(child);},setAttribute(key,value){this.attrs[key]=value;},focus(){},scrollTop:90,scrollLeft:30});
   const $=selector=>{if(!elements.has(selector))elements.set(selector,element());return elements.get(selector);};
-  const state={clone,cleanContext:value=>clone(value||{}),$,originalReadonly,readonly:originalReadonly,experience:false,experienceReturn:null,activeFlow:null,activeCanvasGesture:null,cancelConnection:null,
+  const state={apiBase:"",clone,cleanContext:value=>clone(value||{}),$,originalReadonly,readonly:originalReadonly,experience:false,experienceReturn:null,activeFlow:null,activeCanvasGesture:null,cancelConnection:null,
     model:{title:'项目',contextDefaults:{role:'admin'},modules:[{id:'a',title:'模块甲',entry:'one'},{id:'b',title:'模块乙',entry:'two'}],nodes:[{id:'one',module:'a',kind:'html'},{id:'two',module:'b',kind:'image'}],flows:[{id:'first',title:'第一条流程',entry:'one'},{id:'second',title:'第二条流程',entry:'two',context:{role:'member'}}]},
     moduleId:'a',current:null,recycleOpen:false,camera:{x:-123,y:234,scale:.63},cameras:{},selected:{type:'node',id:'one'},flowContext:{before:'keep'},mode:null,linkCaptureTarget:null,
     viewReady:true,linesHidden:false,location:{pathname:'/'},localStorage:{setItem(key,value){stored.push({key,value});}},
     document:{body:{classList:{toggle(name,on){if(on)classes.add(name);else classes.delete(name);}}},createElement:element},
-    fit(){state.fitted=true;},closeAnnotationEditor(){},notice(message){state.lastNotice=message;},saveCanvasCamera(){state.cameras[state.moduleId]=clone(state.camera);},
+    fit(){state.fitted=true;},dismissImagePreview(){state.previewDismissed=true;},closeAnnotationEditor(){},notice(message){state.lastNotice=message;},saveCanvasCamera(){state.cameras[state.moduleId]=clone(state.camera);},
     node(id){return state.model.nodes.find(n=>n.id===id);},openNode(id){state.current=id;state.moduleId=state.node(id).module;state.renderAll();},
     renderAll(){state.renderExperience();},activeCameraKey(){return state.moduleId;}};
   const context=vm.createContext(state);vm.runInContext(entries+controller+app.slice(app.indexOf('function viewKey(){'),app.indexOf('function rememberView(){')),context);
   return {state,context,$,classes,stored};
 }
-test('两种视图入口常驻；体验、切换流程与重启后仍能恢复原画布',()=>{
+test('两种视图入口常驻；体验及切换平台后仍能恢复原画布',()=>{
   const {state:s,$,classes,stored}=setup(),before=clone({model:s.model,camera:s.camera,selected:s.selected,flowContext:s.flowContext});
   s.renderExperience();assert.equal($('#experience-start').hidden,false);assert.equal($('#experience-exit').hidden,false);
   s.startExperience();assert.equal(s.current,'one');assert.equal(s.readonly,true);assert(classes.has('experience'));assert.equal($('#experience-start').attrs['aria-pressed'],'true');assert.equal($('#experience-exit').attrs['aria-pressed'],'false');assert.equal($('#page-viewport').scrollTop,0);

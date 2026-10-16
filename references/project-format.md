@@ -39,8 +39,11 @@
 
 - `modules` 为模块，`nodes` 为页面、截图或说明。`kind` 为 `html`、`image` 或 `note`；说明写入 `description`。`x/y` 是画布位置，`width/height` 是原页面尺寸，不能用缩略卡片尺寸替代。
 - `canvasType: "pc" | "mobile"` 只决定卡片类型。移动 HTML 可按尺寸自动识别。
+- `canvas: false` 将仍需播放的操作状态与画布展示分开，不出现在画布或回收站；Agent 可用它保存交互需要的中间状态。
 - `overview: false` 可隐藏不需要在画布重复展示的状态，仍可作为跳转目标。需要归并到可见页面时使用 `overviewAlias`。
-- `modules[].entry` 是模块体验入口。`flows` 可定义多个用户任务；每个流程必须有现存页面作为入口，`context` 只影响演示条件。
+- 模块只用于画布组织。没有 `experiences` 时，完整原型从 `entryModule` 的首个有效页面进入，合并全部模块；既有 `modules[].entry` 仅作为兼容的入口线索，不提供手动设置按钮。
+- 只有不同产品或平台才定义 `experiences: [{"id":"pc","title":"PC端","entry":"home"},{"id":"mobile","title":"移动端","entry":"mobile-home"}]`。入口由 Agent 依据已有设计选择，仍可跨模块跳转；选择器只在两个及以上入口时显示。
+- 旧项目的 `flows` 作为显式场景入口保留兼容；新增项目使用产品或平台级 `experiences`，不要按模块自动生成场景。每个入口必须对应实际可体验页面，`context` 只影响演示条件。
 - 后续编辑保留稳定标识、手调位置、`waypoints`、`labelPosition` 和普通批注；不要为了新增一个页面而重新排列整张画布。
 
 ## 跳转与分支
@@ -50,6 +53,7 @@
 - 同一按钮可对应多条边：`when: {"role":"admin"}` 指定分支条件；`setContext: {"hasSelected":true}` 记录演示选择。条件匹配只有一条时直接进入，多条时供查看者选择。没有匹配时停留当前页。
 - 页面内的真实脚本可保留局部交互。绑定为跨页跳转的控件由播放器接管；不要同时在其脚本中实现另一次跨页跳转。
 - `kind: "note", presentation: "branch"` 是画布分叉点，仅表达结构；实际按钮跳转仍绑定到原页面。
+- `canvasFrom` 只改变连线在画布上的出发点。删除支线后应收拢已无分支作用的连接点；删除连接点应接回前后关系，保留原始 `from/to`、控件绑定、条件及业务说明，不能按普通页面删除连带清空主链。
 
 ## 可选声明式局部交互
 
@@ -71,7 +75,7 @@
 - `set` 配合 `data-yx-key / data-yx-value` 设置演示上下文的字符串值。
 - `data-yx-bind` 把输入值保存在本次体验的上下文中，跨页保留；复选框为布尔值。`data-yx-text` 展示对应值；`data-yx-visible="role" data-yx-value="admin"` 按值控制显示。
 - 上下文键使用英文字母开头的字母、数字、下划线或连字符。仅允许字符串、布尔值和有限数字。
-- 重新开始会清空本次体验的输入，恢复项目与当前流程默认值。
+- 产品或平台切换时使用其默认演示上下文；跨页跳转保留已绑定字段。工作台不提供“重新开始”操作。
 
 ## 普通批注
 
@@ -92,6 +96,16 @@ node "<Skill目录>/scripts/yuanxing.mjs" export --root "<项目目录>" --view 
 
 `add` 复制输入并内嵌直接资源，不改输入原件。PNG 可读取原尺寸；JPEG / WebP 需显式给出宽高。命令通过文件版本核对保存；外部修改冲突时停止，重新读取后再落实当前范围。
 
+## 多项目工作区
+
+项目彼此独立，不把多个项目塞进一份 `workbench.json`。工作区文件只登记入口，路径相对该文件；扩展路径相对项目根目录。
+
+```json
+{"version":1,"defaultProject":"crm","projects":[{"id":"crm","title":"客户管理","root":"./crm"},{"id":"portal","title":"用户门户","root":"./portal","extension":"scripts/yuanxing"}]}
+```
+
+Agent 使用 `workspace add --workspace <文件> --root <项目> --id <标识>` 登记，使用 `serve --workspace <文件> --open` 打开。顶栏切换项目时先等待保存，保存失败或冲突时留在原项目。项目分别使用 `/p/<id>/` URL、保存版本、视图偏好和项目扩展，避免串数据。新增项目登记后刷新工作台即可出现在选择器；离线导出仅内嵌当前项目，不携带整个工作区。
+
 ## 项目扩展
 
 通用工作台只维护 `runtime/` 一份实现。项目自己的页面、数据和专用交互放在项目目录，通过启动参数加载扩展；不复制或修改另一份工作台内核。普通项目无需扩展。
@@ -111,13 +125,15 @@ node scripts/yuanxing.mjs export --root ./my-project --extension ./my-project/ex
 }
 ```
 
-入口导出 `createProjectExtension(host)`，不依赖工作台文件的私有变量。`host` 提供 `getState`、`node`、`openNode`、`measure`、`visibleRect`、`renderOverlays`、`renderInspector` 与 `download`。`getState()` 返回当前模型、页面、iframe、交互模式、缩放和节点，回调执行时应重新读取当前状态。
+入口导出 `createProjectExtension(host)`，不依赖工作台文件的私有变量。`host` 提供 `getState`、`node`、`openNode`、`measure`、`visibleRect`、`renderOverlays`、`renderInspector` 与 `download`。`getState()` 返回当前模型、页面、iframe、交互模式、缩放和节点，回调执行时应重新读取当前状态，`experience` 表示当前是否为完整原型。
 
 可返回的扩展钩子：
 
 | 属性或函数 | 用途 |
 | --- | --- |
 | `declarative: true` | 使用禁止页面脚本的声明式页面，与清单中的设置保持一致 |
+| `nativeInteraction: true` | 完整原型直接使用声明式 iframe 内的真实控件，停用外层透明热点与替身输入框；评审画布继续使用原有打点机制 |
+| `nativeInput(event, type)` / `nativeKeyDown(event)` | 原生输入、change 与键盘事件；页面内跳转由内核直接绑定实际元素 |
 | `styles` | 扩展的控件样式 |
 | `bindHotspots: false` | 项目自行维护控件绑定时，收起通用点击区域编辑入口 |
 | `layout(doc, node)` / `mount(doc, node)` | 排版缩略图、挂载打开后的页面 |

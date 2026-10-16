@@ -5,6 +5,8 @@ import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {createStore,standalone,serve} from '../runtime/server.mjs';
 import {validate,exportIssues} from '../runtime/core.mjs';
+import {readWorkspace,registerProject,serveWorkspace} from '../runtime/workspace.mjs';
+import {flowEntries} from '../runtime/player.mjs';
 import {inlineHTML} from '../runtime/resources.mjs';
 
 const home=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -14,6 +16,9 @@ node scripts/yuanxing.mjs init <目录> [--template blank|iteration] [--name 名
 node scripts/yuanxing.mjs add --root <目录> --source <HTML或图片> [--title 名称] [--id 标识] [--module 标识] [--width 1280 --height 800]
 node scripts/yuanxing.mjs connect --root <目录> --from <页面> --to <页面> --selector <CSS选择器> [--label 操作]
 node scripts/yuanxing.mjs connect --root <目录> --from <页面> --to <页面> --rect x,y,w,h [--label 操作]
+node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项目目录> --id <项目标识> [--name 名称]
+node scripts/yuanxing.mjs workspace list --workspace <工作区.json>
+node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] [--open]
 node scripts/yuanxing.mjs check --root <目录>
 node scripts/yuanxing.mjs serve --root <目录> [--port 4318] [--open]
 node scripts/yuanxing.mjs export --root <目录> --view review|prototype [--module 标识] [--flow 标识] [--out 文件.html] [--replace]
@@ -44,13 +49,33 @@ export async function run(args,{sessionToken}={}){
     const root=path.resolve(flags._[0]||required(flags,'root')),template=flags.template||'blank';
     if(await exists(root))throw new Error('目标目录已存在，请选择新目录');
     if(!['blank','iteration'].includes(template))throw new Error('模板应为 blank 或 iteration');
-    if(template==='iteration')await fs.cp(path.join(home,'examples/product-iteration'),root,{recursive:true,errorOnExist:true,force:false});
+    if(template==='iteration'){
+      const sample=path.join(home,'examples/product-iteration');
+      if(await exists(sample))await fs.cp(sample,root,{recursive:true,errorOnExist:true,force:false});
+      else{
+        const files=JSON.parse(await fs.readFile(path.join(home,'assets/iteration.json'),'utf8'));
+        for(const [relative,data] of Object.entries(files)){
+          const file=path.resolve(root,relative);if(!sameOrInside(root,file)||file===root)throw new Error('示例资源路径不正确');
+          await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,Buffer.from(data,'base64'),{flag:'wx'});
+        }
+      }
+    }
     else{
       await fs.mkdir(path.join(root,'artifact/pages'),{recursive:true});await fs.mkdir(path.join(root,'artifact/assets'));
       await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify({version:1,title:flags.name||'我的原型',entryModule:'main',modules:[{id:'main',title:'主要流程'}],nodes:[],edges:[],annotations:[]},null,2)+'\n',{flag:'wx'});
     }
     if(template==='iteration'&&flags.name){const file=path.join(root,'artifact/workbench.json'),model=JSON.parse(await fs.readFile(file,'utf8'));model.title=flags.name;await fs.writeFile(file,JSON.stringify(model,null,2)+'\n');}
     console.log(`已创建 ${root}`);return;
+  }
+  if(command==='workspace'){
+    const file=path.resolve(required(flags,'workspace'));
+    if(flags._[0]==='list'){console.log(JSON.stringify(await readWorkspace(file),null,2));return;}
+    if(flags._[0]!=='add')throw new Error('工作区操作应为 add 或 list');
+    const item=await registerProject(file,{id:required(flags,'id'),title:flags.name,root:required(flags,'root'),builder:flags.builder,validator:flags.validator,extension:flags.extension});console.log(`已登记 ${item.title}（${item.id}）`);return;
+  }
+  if(command==='serve'&&flags.workspace){
+    const port=Number(flags.port||4318);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('端口应为 1～65535');
+    return serveWorkspace(path.resolve(flags.workspace),{port,open:!!flags.open,project:flags.project,sessionToken});
   }
   const root=path.resolve(required(flags,'root')),store=await createStore(root,{builder:flags.builder,validator:flags.validator,extension:flags.extension});
   if(command==='serve'){
@@ -65,7 +90,7 @@ export async function run(args,{sessionToken}={}){
     await store.check();const view=flags.view||'review';if(!['review','prototype'].includes(view))throw new Error('视图应为 review 或 prototype');
     const bundle=await store.load();
     if(flags.module&&!bundle.model.modules.some(m=>m.id===flags.module))throw new Error('模块不存在');
-    if(flags.flow&&!bundle.model.flows?.some(flow=>flow.id===flags.flow))throw new Error('体验流程不存在');
+    if(flags.flow&&!flowEntries(bundle.model).some(flow=>flow.id===flags.flow))throw new Error('体验流程不存在');
     const out=path.resolve(flags.out||path.join(root,'dist',view==='prototype'?'prototype.html':'workbench.html'));
     if(sameOrInside(path.join(root,'artifact'),out)||!out.toLowerCase().endsWith('.html'))throw new Error('导出应为 artifact 目录以外的 HTML 文件');
     if(await exists(out)){const stat=await fs.lstat(out);if(stat.isSymbolicLink()||!stat.isFile()||!flags.replace)throw new Error('输出已存在；确认是生成文件后使用 --replace');}

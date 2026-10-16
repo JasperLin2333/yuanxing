@@ -78,9 +78,21 @@ node scripts/yuanxing.mjs init ./my-iteration --template iteration
 node scripts/yuanxing.mjs serve --root ./my-iteration --open
 ```
 
-打开后可以拖动页面、整理连线、绑定点击区域、打点批注。顶栏点击「完整原型」即可从流程入口连续体验；点击「流程画布」或按 Esc 返回，保留原来的画布位置与缩放。你的 AI 助手可直接读取 [SKILL.md](SKILL.md)，继续修改 `my-iteration` 中的页面与流程。
+直接告诉 AI 需要哪些页面和交互，它会组织模块、绑定操作并串联已有流程。打开工作台后也可以拖动页面、整理连线和打点批注。顶栏居中点击「完整原型」即可跨模块连续体验；点击「流程画布」或按 Esc 返回，保留原来的画布位置与缩放。你的 AI 助手可直接读取 [SKILL.md](SKILL.md)，继续修改 `my-iteration` 中的页面与流程。
 
 手动安装到现有 AI 宿主的命令见下文。操作细节见[工作台手册](references/workbench.md)。
+
+## 多个项目，共用一个工作台
+
+对 AI 说“再建一个用户门户项目，加到当前工作台”，它会创建独立项目并登记到工作区。顶栏左侧切换项目，页面、画布、批注和导出各自保存；中间始终是「流程画布／完整原型」切换。
+
+```sh
+node scripts/yuanxing.mjs workspace add --workspace ./my-workspace.json --root ./my-iteration --id crm
+node scripts/yuanxing.mjs workspace add --workspace ./my-workspace.json --root ./my-portal --id portal
+node scripts/yuanxing.mjs serve --workspace ./my-workspace.json --open
+```
+
+同一产品的全部模块组成完整原型，由 AI 串联已设计的按钮和导航。只有不同产品或平台才分开入口，无需手动设置模块体验入口。没有设计的功能不会自动补造。
 
 ## 一份设计，两种交付
 
@@ -144,3 +156,15 @@ npm run build:demo
 通用工作台统一维护在 `runtime/`。项目页面、数据与专用交互可以独立保存，通过显式的项目扩展接入同一个内核，启动和离线导出使用相同实现。扩展接口见[项目格式说明](references/project-format.md#项目扩展)。
 
 欢迎在 [Issues](https://github.com/JasperLin2333/yuanxing/issues) 分享你要设计的具体场景、使用问题或改进建议。主代码采用 [MIT](LICENSE) 许可证，附带连线组件的来源和许可证见[第三方说明](THIRD_PARTY_NOTICES.md)。
+
+## Skill 接入与市场包
+
+一份通用 Skill 与运行时持续维护，宿主适配按实际的文件、命令、浏览器和产物能力选择执行方式；市场专用元数据在打包时注入。详细规则见 [Agent 接入与分发](references/agent-adaptation.md)。
+
+```sh
+npm run pack:generic
+npm run pack
+npm run pack:workbuddy
+```
+
+分别生成标准包、SkillHub 包和 WorkBuddy 包，保存在 `dist/<通道>/yuanxing.zip`。发布包不含官网、演示导出、测试或个人项目，每个通道均校验脱离源码后的创建、检查和离线导出。豆包工作等其他市场先使用通用格式准备，待其规范与宿主实际执行确认后再增加发布通道。

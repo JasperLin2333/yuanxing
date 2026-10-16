@@ -1,5 +1,5 @@
-import './vendor/libavoid.min.js';
-import './vendor/libavoid-routing.js';
+import './libavoid.min.js';
+import './libavoid-routing.js';
 
 // 只计算路径。页面、控件绑定、手动折线和批注均不写回。
 export const canvasCardSize={width:400,height:290,header:40};
@@ -27,7 +27,11 @@ function routingResult(points,engine){
 }
 
 function routingConstraint(n,point,side){const clamp=v=>Math.max(0,Math.min(1,v)),size=nodeCardSize(n);return {x:clamp((point[0]-n.x)/size.width),y:clamp((point[1]-n.y)/size.height),dir:routingDirs[side]};}
-function routingFree(point,side){const v=routingVectors[side];return {x:point[0]+v[0]*32,y:point[1]+v[1]*32};}
+export function connectionJetty(point,other,side,flexible=false){
+  const v=routingVectors[side],distance=(other[0]-point[0])*v[0]+(other[1]-point[1])*v[1];
+  return flexible&&distance>0?Math.min(32,distance/2):32;
+}
+function routingFree(point,side,length=32){const v=routingVectors[side];return {x:point[0]+v[0]*length,y:point[1]+v[1]*length};}
 function routingSignature(line){return JSON.stringify([line.edge.from,line.edge.to,line.fromSide,line.toSide,line.start,line.end,line.edge.waypoints??null]);}
 export function validConnectionShape(points,fromSide,toSide){
   const ps=points.filter((p,i)=>!i||p[0]!==points[i-1][0]||p[1]!==points[i-1][1]);if(ps.length<2)return false;
@@ -51,16 +55,17 @@ function routingAuto(line,vertices,fallbackRoute){
   if(globalThis.Avoid?.Router&&globalThis.AvoidRouting?.computeRoutes){
     const Avoid=globalThis.Avoid,solver=Object.create(Avoid),scale=1000;
     solver.Router=function(flag){const router=new Avoid.Router(flag);router.setRoutingParameter(Avoid.RoutingParameter.segmentPenalty,24*scale);return router;};
-    const free=(p,side)=>{const v=routingFree(p,side);return {x:v.x*scale,y:v.y*scale};};
     const fromBranch=line.from.presentation==='branch',toBranch=line.to.presentation==='branch';
-    const edge={id:line.edge.id,...(fromBranch?{sourcePoint:free(line.start,line.fromSide)}:{source:line.from.id,sourceConstraint:routingConstraint(line.from,line.start,line.fromSide),sourceJetty:32*scale}),...(toBranch?{targetPoint:free(line.end,line.toSide)}:{target:line.to.id,targetConstraint:routingConstraint(line.to,line.end,line.toSide),targetJetty:32*scale})};
+    const flexible=fromBranch||toBranch,sourceLength=connectionJetty(line.start,line.end,line.fromSide,flexible),targetLength=connectionJetty(line.end,line.start,line.toSide,flexible);
+    const free=(p,side,length)=>{const v=routingFree(p,side,length);return {x:v.x*scale,y:v.y*scale};};
+    const edge={id:line.edge.id,...(fromBranch?{sourcePoint:free(line.start,line.fromSide,sourceLength)}:{source:line.from.id,sourceConstraint:routingConstraint(line.from,line.start,line.fromSide),sourceJetty:sourceLength*scale}),...(toBranch?{targetPoint:free(line.end,line.toSide,targetLength)}:{target:line.to.id,targetConstraint:routingConstraint(line.to,line.end,line.toSide),targetJetty:targetLength*scale})};
     const scaled=vertices.map(v=>({...v,x:v.x*scale,y:v.y*scale,w:v.w*scale,h:v.h*scale}));
     const solved=globalThis.AvoidRouting.computeRoutes(solver,scaled,[edge],{shapeBufferDistance:16*scale,idealNudgingDistance:0});
     if(solved[edge.id]){
       const points=[line.start,...solved[edge.id].map(p=>[p.x/scale,p.y/scale]),line.end];
       // 分叉点不占卡片空间，接回其精确坐标。
-      if(fromBranch){const p=routingFree(line.start,line.fromSide);points.splice(1,0,[p.x,p.y]);}
-      if(toBranch){const p=routingFree(line.end,line.toSide);points.splice(-1,0,[p.x,p.y]);}
+      if(fromBranch){const p=routingFree(line.start,line.fromSide,sourceLength);points.splice(1,0,[p.x,p.y]);}
+      if(toBranch){const p=routingFree(line.end,line.toSide,targetLength);points.splice(-1,0,[p.x,p.y]);}
       for(const p of points)for(let axis=0;axis<2;axis++)for(const end of [line.start,line.end])if(Math.abs(p[axis]-end[axis])<.001)p[axis]=end[axis];
       route=routingResult(points,'libavoid');
     }

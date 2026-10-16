@@ -45,7 +45,7 @@ test('剪切和粘贴只移除或新增对应卡片，已有 iframe DOM 保持�
 });
 async function sourceRefreshFixture(){
   const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),source=app.slice(app.indexOf('async function refreshSources(){'),app.indexOf('try{if(boot.bundle)'));let respond,started,requests=0,renders=0;const ready=new Promise(resolve=>started=resolve);
-  const state={readonly:false,dirty:false,saving:false,sourceRefreshFlight:false,annotationEditorId:null,pendingImages:new Set(),activeCanvasGesture:null,cancelConnection:null,revision:'before',model:fixture(),bundle:{sourcesSignature:'before',images:{}},selected:null,current:null,positions:{},missing:new Set(),history:{clear(){}},node:()=>null,renderAll:()=>renders++,canvas:()=>renders++,viewer:()=>renders++,renderInspector(){},document:{activeElement:null},fetch:url=>{if(url.endsWith('/status'))return Promise.resolve({ok:true,json:async()=>({revision:'external',sourceVersion:'external'})});requests++;return new Promise(resolve=>{respond=resolve;started();});}};
+  const state={apiBase:"",readonly:false,dirty:false,saving:false,sourceRefreshFlight:false,annotationEditorId:null,pendingImages:new Set(),activeCanvasGesture:null,cancelConnection:null,revision:'before',model:fixture(),bundle:{sourcesSignature:'before',images:{}},selected:null,current:null,positions:{},missing:new Set(),history:{clear(){}},node:()=>null,renderAll:()=>renders++,canvas:()=>renders++,viewer:()=>renders++,renderInspector(){},document:{activeElement:null},fetch:url=>{if(url.endsWith('/status'))return Promise.resolve({ok:true,json:async()=>({revision:'external',sourceVersion:'external'})});requests++;return new Promise(resolve=>{respond=resolve;started();});}};
   const context=vm.createContext(state);vm.runInContext(source+'globalThis.runRefresh=refreshSources;',context);
   return {context,ready,run:()=>context.runRefresh(),respond:value=>respond({ok:true,json:async()=>value}),requests:()=>requests,renders:()=>renders};
 }
@@ -81,14 +81,14 @@ test('资源版本变化但内容相同时推进探测基线，避免每次轮�
 });
 test('连线绘制同帧合并，相同几何不重建，隐藏连线时不计算路径',async()=>{
   const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),draw=app.slice(app.indexOf('function drawLines(){'),app.indexOf('function edgeGeometryGesture(')),sections=app.slice(app.indexOf('function renderSections(){'),app.indexOf('function highlightCards('));
-  let queued=[],writes=0,routes=0,sectionWrites=0;const svg={childNodes:[],set innerHTML(value){writes++;this.childNodes=[value];},append(...items){this.childNodes.push(...items);},replaceChildren(){this.childNodes=[];}},sectionHost={replaceChildren(){sectionWrites++;},append(){}},element=()=>({classList:{add(){},toggle(){}},dataset:{},setAttribute(){},append(){}});
-  const state={lineFrame:null,lastLinesSignature:null,lastSectionsSignature:null,lineTextContext:null,cancelConnection:null,current:null,recycleOpen:false,linesHidden:false,moduleId:'a',selected:null,model:fixture(),readonly:false,requestAnimationFrame:fn=>(queued.push(fn),queued.length),$:selector=>selector==='#lines'?svg:sectionHost,activeCanvasNodes:()=>[state.model.nodes[0]],canvasSections:()=>[],overviewEdges:()=>[],canvasNodeWidth,canvasNodeHeight,routeConnections:()=>{routes++;return [];},placeConnectionLabels:()=>new Map(),getComputedStyle:()=>({fontFamily:'sans-serif'}),document:{createElement:()=>({getContext:()=>({measureText:()=>({width:10})})}),createElementNS:element}};
+  let queued=[],writes=0,routes=0,sectionWrites=0;const svg={childNodes:[],set innerHTML(value){writes++;this.childNodes=[value];},append(...items){this.childNodes.push(...items);},replaceChildren(){this.childNodes=[];}},sectionHost={replaceChildren(){sectionWrites++;},append(){}},element=()=>({classList:{add(){},toggle(){}},dataset:{},setAttribute(){},append(){},replaceChildren(){}});
+  const state={lineFrame:null,camera:{scale:1},lastLinesSignature:null,lastSectionsSignature:null,lineTextContext:null,cancelConnection:null,current:null,recycleOpen:false,linesHidden:false,moduleId:'a',selected:null,model:fixture(),readonly:false,requestAnimationFrame:fn=>(queued.push(fn),queued.length),$:selector=>selector==='#lines'?svg:sectionHost,activeCanvasNodes:()=>[state.model.nodes[0]],canvasSections:()=>[],overviewEdges:()=>[],canvasNodeWidth,canvasNodeHeight,routeConnections:()=>{routes++;return [];},placeConnectionLabels:()=>new Map(),getComputedStyle:()=>({fontFamily:'sans-serif'}),document:{createElement:()=>({getContext:()=>({measureText:()=>({width:10})})}),createElementNS:element}};
   vm.runInContext(sections+draw,vm.createContext(state));const flush=()=>{const jobs=queued;queued=[];jobs.forEach(fn=>fn());};
   state.drawLines();state.drawLines();state.drawLines();assert.equal(queued.length,1);flush();assert.equal(writes,1);assert.equal(routes,1);assert.equal(sectionWrites,1);
   state.drawLines();flush();assert.equal(writes,1);assert.equal(routes,1);assert.equal(sectionWrites,1);
-  state.model.nodes[0].x++;state.drawLines();flush();assert.equal(writes,2);assert.equal(routes,2);
-  state.linesHidden=true;state.model.nodes[0].x++;state.drawLines();flush();assert.equal(writes,2);assert.equal(routes,2);
-  state.linesHidden=false;state.drawLines();flush();assert.equal(writes,3);assert.equal(routes,3);
+  state.model.nodes[0].x++;state.drawLines();flush();assert.equal(writes,1);assert.equal(routes,2);
+  state.linesHidden=true;state.model.nodes[0].x++;state.drawLines();flush();assert.equal(writes,1);assert.equal(routes,2);
+  state.linesHidden=false;state.drawLines();flush();assert.equal(writes,1);assert.equal(routes,3);
 });
 test('粘贴覆盖只面向已打开或单独选中的图片，多选和其他页面不覆盖',()=>{
   const m=fixture();m.nodes[0].kind='image';m.nodes[0].path='assets/old.png';const target=m.nodes[0];

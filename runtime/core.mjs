@@ -1,5 +1,5 @@
 // 编辑端、离线分享端与校验共用的数据操作。
-import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType} from './routing.mjs';
+import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty} from './routing.mjs';
 export const clone = value => JSON.parse(JSON.stringify(value));
 export const uid = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -34,6 +34,40 @@ export function connectionDirections(edge,from,to){
   const side=horizontal?(dx<0?'left':'right'):(dy<0?'top':'bottom'),opposite={top:'bottom',bottom:'top',left:'right',right:'left'};
   return [edge.fromSide||side,edge.toSide||opposite[side]];
 }
+export function connectionTarget(nodes,point,{exclude=[],tolerance=24,side=null}={}){
+  const excluded=new Set(exclude);let best=null;
+  for(const n of nodes){
+    if(excluded.has(n.id))continue;
+    const inside=point[0]>=n.x&&point[0]<=n.x+canvasNodeWidth(n)&&point[1]>=n.y&&point[1]<=n.y+canvasNodeHeight(n);
+    for(const candidate of side?[side]:connectionSides){
+      const anchor=connectionPoint(n,candidate),distance=Math.hypot(anchor[0]-point[0],anchor[1]-point[1]);if(!inside&&distance>tolerance)continue;
+      const score=distance-(inside?1e6:0);if(!best||score<best.score)best={node:n,side:candidate,point:anchor,distance,score};
+    }
+  }
+  return best;
+}
+// 预览与提交使用同一组节点、端口及避障计算；游离端点只在预览期间存在。
+export function previewConnection(nodes,fixed,fixedSide,target,targetSide,{endpoint='to',branch=false}={}){
+  if(!fixed||!target||fixed.id===target.id)return null;
+  const movingFrom=endpoint==='from',from=movingFrom?target:fixed,to=movingFrom?fixed:target;
+  const edge={id:'connection-preview',from:from.id,to:to.id,fromSide:movingFrom?targetSide:branch?connectionDirections({},fixed,target)[0]:fixedSide,toSide:movingFrom?fixedSide:targetSide};
+  const byId=new Map(nodes.map(n=>[n.id,n]));byId.set(fixed.id,fixed);byId.set(target.id,target);
+  return routeConnections([...byId.values()],[edge],{scope:'connection-preview'})[0]||null;
+}
+export function connectionDisplayPath(points,radius=8,nodes=[]){
+  if(!points?.length)return '';
+  let path='M'+points[0].join(',');
+  for(let i=1;i<points.length-1;i++){
+    const a=points[i-1],b=points[i],c=points[i+1],before=Math.hypot(b[0]-a[0],b[1]-a[1]),after=Math.hypot(c[0]-b[0],c[1]-b[1]);
+    let r=Math.max(0,Math.min(radius,before/2,after/2));
+    if(!before||!after||a[0]===b[0]&&b[0]===c[0]||a[1]===b[1]&&b[1]===c[1])r=0;
+    if(!r){path+=' L'+b.join(',');continue;}
+    const start=b.map((v,axis)=>v+(a[axis]-v)/before*r),end=b.map((v,axis)=>v+(c[axis]-v)/after*r),box={x:Math.min(start[0],end[0]),y:Math.min(start[1],end[1]),right:Math.max(start[0],end[0]),bottom:Math.max(start[1],end[1])};
+    const blocked=nodes.some(n=>!isBranch(n)&&box.x<n.x+canvasNodeWidth(n)&&box.right>n.x&&box.y<n.y+canvasNodeHeight(n)&&box.bottom>n.y);
+    path+=blocked?' L'+b.join(','):' L'+start.join(',')+' Q'+b.join(',')+' '+end.join(',');
+  }
+  return points.length>1?path+' L'+points.at(-1).join(','):path;
+}
 // 建线只改变关系；用户摆好的页面和已选端点不参与自动排布。
 export function connectNodes(model,from,to,fromSide,toSide){
   if(from===to||![from,to].every(id=>model.nodes.some(n=>n.id===id))||![fromSide,toSide].every(side=>connectionSides.includes(side)))return null;
@@ -41,7 +75,14 @@ export function connectNodes(model,from,to,fromSide,toSide){
   model.edges.push({id,from,to,fromSide,toSide,label:diagram?'':'继续',trigger:'next',description:'',...(diagram?{diagram:true}:{})});return id;
 }
 export function snapNodePosition(node,point,others,tolerance=8){
-  const result={x:point[0],y:point[1],guides:[]},matches=[];if(isBranch(node)||tolerance<=0)return result;
+  const result={x:point[0],y:point[1],guides:[]},matches=[];if(tolerance<=0)return result;
+  if(isBranch(node)){
+    for(const [axis,index] of [['x',0],['y',1]]){
+      let nearest=null;for(const other of others)if(other.id!==node.id)for(const side of connectionSides){const anchor=connectionPoint(other,side),delta=anchor[index]-(result[axis]+8);if(Math.abs(delta)<=tolerance&&(!nearest||Math.abs(delta)<Math.abs(nearest.delta)))nearest={anchor,delta};}
+      if(nearest){result[axis]+=nearest.delta;const cross=1-index;result.guides.push({axis,position:result[axis]+8,start:Math.min(point[cross]+8,nearest.anchor[cross])-16,end:Math.max(point[cross]+8,nearest.anchor[cross])+16});}
+    }
+    return result;
+  }
   for(const [axis,size] of [['x',canvasNodeWidth],['y',canvasNodeHeight]]){
     const cross=axis==='x'?'y':'x';let nearest=null;
     for(const other of others)if(other.id!==node.id&&!isBranch(other))for(const fraction of [0,.5,1]){
@@ -79,6 +120,11 @@ export function moveCanvasNodes(model,moduleId,positions){
   for(const n of visible.filter(n=>n.reference)){model.referencePositions??={};model.referencePositions[moduleId]??={};model.referencePositions[moduleId][n.id]??={x:n.x,y:n.y};}
   for(const position of positions){const n=byId.get(position.id);if(!n||![position.x,position.y].every(value=>Number.isFinite(value)))continue;
     const dx=position.x-n.x,dy=position.y-n.y;if(!dx&&!dy)continue;deltas.set(n.id,[dx,dy]);
+    if(isBranch(n)&&positions.length===1){
+      const center=[position.x+8,position.y+8],blocked=visible.some(other=>other.id!==n.id&&!isBranch(other)&&center[0]>other.x-12&&center[0]<other.x+canvasNodeWidth(other)+12&&center[1]>other.y-12&&center[1]<other.y+canvasNodeHeight(other)+12);
+      const next=visible.map(other=>other.id===n.id?{...other,x:position.x,y:position.y}:other),incident=overviewEdges(model).filter(edge=>edge.from===n.id||edge.to===n.id);
+      if(blocked||routeConnections(next,incident,{scope:'branch-move-preview'}).some(line=>line.route.blocked)){deltas.delete(n.id);continue;}
+    }
     if(n.reference)model.referencePositions[moduleId][n.id]={x:position.x,y:position.y};
     else Object.assign(model.nodes.find(owner=>owner.id===n.id),{x:position.x,y:position.y});
   }
@@ -163,30 +209,36 @@ export function reconnectEdge(model,id,endpoint,nodeId,side,fixedSide) {
   if(connectionSides.includes(fixedSide))edge[endpoint==='from'?'toSide':'fromSide']=fixedSide;
   if(isBranch(model.nodes.find(n=>n.id===edge.from))||isBranch(model.nodes.find(n=>n.id===edge.to)))edge.diagram=true;
   else delete edge.diagram;
+  normalizeBranchJunctions(model);
   return true;
 }
 // 控件位于实际折线的最长线段中间，不采用已偏移的文字位置。
-export function lineBranchSplit(points){
+export function lineBranchSplit(points,near=null){
   if(!Array.isArray(points)||points.length<2||!points.every(isCanvasPoint))return null;
-  let index=0,longest=0;
-  for(let i=0;i<points.length-1;i++){const a=points[i],b=points[i+1];if(a[0]!==b[0]&&a[1]!==b[1])return null;const length=Math.hypot(b[0]-a[0],b[1]-a[1]);if(length>longest){index=i;longest=length;}}
+  let index=0,longest=0,distance=Infinity,chosen;
+  for(let i=0;i<points.length-1;i++){const a=points[i],b=points[i+1];if(a[0]!==b[0]&&a[1]!==b[1])return null;const length=Math.hypot(b[0]-a[0],b[1]-a[1]);if(!length)continue;
+    if(near&&isCanvasPoint(near)){const point=a.map((v,axis)=>Math.max(Math.min(v,b[axis]),Math.min(Math.max(v,b[axis]),near[axis]))),d=Math.hypot(point[0]-near[0],point[1]-near[1]);if(d<distance){distance=d;index=i;chosen=point;longest=length;}}
+    else if(length>longest){index=i;longest=length;}
+  }
   if(!longest)return null;
-  const a=points[index],b=points[index+1],point=[(a[0]+b[0])/2,(a[1]+b[1])/2],side=b[0]===a[0]?(b[1]>a[1]?'bottom':'top'):(b[0]>a[0]?'right':'left');
+  const a=points[index],b=points[index+1],point=chosen||[(a[0]+b[0])/2,(a[1]+b[1])/2],side=b[0]===a[0]?(b[1]>a[1]?'bottom':'top'):(b[0]>a[0]?'right':'left');
   return {point,side,before:[...points.slice(0,index+1).map(p=>[...p]),point],after:[point,...points.slice(index+1).map(p=>[...p])]};
 }
 export function createLineBranch(model,edgeId,targetId,point,targetSide='top',route=null) {
   const edge=model.edges.find(e=>e.id===edgeId),target=model.nodes.find(n=>n.id===targetId);
   if(!edge||!target||!Array.isArray(point)||point.length!==2||!point.every(Number.isFinite)||!connectionSides.includes(targetSide))return null;
-  const split=route&&lineBranchSplit(route.points);if(route&&(!split||split.point.some((v,i)=>v!==point[i])||![route.fromSide,route.toSide].every(side=>connectionSides.includes(side))||route.from&&!model.nodes.some(n=>n.id===route.from)||route.module&&!model.modules.some(m=>m.id===route.module)))return null;
+  const split=route&&lineBranchSplit(route.points,point);if(route&&(!split||split.point.some((v,i)=>Math.abs(v-point[i])>1e-6)||![route.fromSide,route.toSide].every(side=>connectionSides.includes(side))||route.branchSide&&!connectionSides.includes(route.branchSide)||route.from&&!model.nodes.some(n=>n.id===route.from)||route.module&&!model.modules.some(m=>m.id===route.module)))return null;
+  const related=route?.edgeIds?model.edges.filter(e=>route.edgeIds.includes(e.id)):[edge],display=new Map(overviewEdges(model).map(e=>[e.id,e])),shown=display.get(edgeId),key=e=>e&&JSON.stringify([e.from,e.to,e.condition||e.label,e.fromSide,e.toSide]);
+  if(!related.includes(edge)||related.some(e=>key(display.get(e.id))!==key(shown)))return null;
   let group=!split&&[edge.to,edge.canvasFrom,edge.from].map(id=>model.nodes.find(n=>n.id===id)).find(isBranch);
   if(group?.id===targetId)return null;
   if(!group){const origin=model.nodes.find(n=>n.id===edge.from),destination=model.nodes.find(n=>n.id===edge.to);if(!origin||!destination)return null;
     group={id:uid('branch'),module:route?.module||origin.module,title:split?'':'分支条件',kind:'note',presentation:'branch',width:16,height:16,x:point[0]-8,y:point[1]-8,description:''};model.nodes.push(group);
     const [heading,arrival]=route?[route.fromSide,route.toSide]:connectionDirections(edge,origin,destination),opposite={top:'bottom',bottom:'top',left:'right',right:'left'},trunk={id:uid('edge'),from:route?.from||edge.canvasFrom||edge.from,to:group.id,fromSide:heading,toSide:opposite[split?.side||heading],label:'',diagram:true,description:''};
-    if(split){trunk.waypoints=split.before.slice(1,-1);edge.waypoints=split.after.slice(1,-1);edge.fromSide=split.side;edge.toSide=arrival;if(!edge.labelPosition&&isCanvasPoint(route.labelPosition))edge.labelPosition=[...route.labelPosition];}
-    model.edges.push(trunk);edge.canvasFrom=group.id;
+    if(split){trunk.waypoints=split.before.slice(1,-1);for(const item of related){item.waypoints=split.after.slice(1,-1).map(p=>[...p]);item.fromSide=split.side;item.toSide=arrival;if(!item.labelPosition&&isCanvasPoint(route.labelPosition))item.labelPosition=[...route.labelPosition];}}
+    model.edges.push(trunk);for(const item of related)item.canvasFrom=group.id;
   }
-  const id=uid('edge');model.edges.push({id,from:group.id,to:targetId,fromSide:connectionDirections({},group,target)[0],toSide:targetSide,label:'',description:'',diagram:true});
+  const id=uid('edge');model.edges.push({id,from:group.id,to:targetId,fromSide:route?.branchSide||connectionDirections({},group,target)[0],toSide:targetSide,label:'',description:'',diagram:true});
   return {edgeId:id,groupId:group.id};
 }
 export function orderedModuleNodes(model,moduleId){
@@ -219,9 +271,9 @@ function obstacleRoute(start,end,obstacles,fromVector,toVector){
   }
   return null;
 }
-export function connectionRoute(start,end,fromSide,toSide,obstacles=[]) {
-  const vectors={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]},a=vectors[fromSide],b=vectors[toSide],stub=32;
-  const s=[start[0]+a[0]*stub,start[1]+a[1]*stub],t=[end[0]+b[0]*stub,end[1]+b[1]*stub];
+export function connectionRoute(start,end,fromSide,toSide,obstacles=[],flexible=false) {
+  const vectors={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]},a=vectors[fromSide],b=vectors[toSide],sourceLength=connectionJetty(start,end,fromSide,flexible),targetLength=connectionJetty(end,start,toSide,flexible);
+  const s=[start[0]+a[0]*sourceLength,start[1]+a[1]*sourceLength],t=[end[0]+b[0]*targetLength,end[1]+b[1]*targetLength];
   const candidates=[[start,s,t,end],[start,s,[t[0],s[1]],t,end],[start,s,[s[0],t[1]],t,end]];
   if(start[0]===end[0]||start[1]===end[1])candidates.push([start,end]);
   const midX=(s[0]+t[0])/2,midY=(s[1]+t[1])/2;
@@ -257,7 +309,7 @@ function manualConnectionRoute(start,end,fromSide,toSide,waypoints,fromBranch=fa
 export function routeConnections(nodes,edges,options={}){
   const byId=new Map(nodes.map(n=>[n.id,n])),obstacles=nodes.filter(n=>!isBranch(n)).map(n=>({x:n.x,y:n.y,width:canvasNodeWidth(n),height:canvasNodeHeight(n)}));
   const lines=edges.filter(e=>byId.has(e.from)&&byId.has(e.to)&&!(byId.get(e.from).reference&&byId.get(e.to).reference)).map(edge=>{const from=byId.get(edge.from),to=byId.get(edge.to),[fromSide,toSide]=connectionDirections(edge,from,to);return {edge,from,to,fromSide,toSide,start:connectionPoint(from,fromSide),end:connectionPoint(to,toSide)};});
-  return solveConnections(nodes,lines,{...options,manualRoute:line=>manualConnectionRoute(line.start,line.end,line.fromSide,line.toSide,line.edge.waypoints,isBranch(line.from),isBranch(line.to)),fallbackRoute:line=>connectionRoute(line.start,line.end,line.fromSide,line.toSide,obstacles)});
+  return solveConnections(nodes,lines,{...options,manualRoute:line=>manualConnectionRoute(line.start,line.end,line.fromSide,line.toSide,line.edge.waypoints,isBranch(line.from),isBranch(line.to)),fallbackRoute:line=>connectionRoute(line.start,line.end,line.fromSide,line.toSide,obstacles,isBranch(line.from)||isBranch(line.to))});
 }
 // 无效的拖动不写入折点，保留上一个可用位置。
 export function adjustConnectionSegment(nodes,edge,points,index,delta){
@@ -347,6 +399,7 @@ export function validate(model) {
     if(n.canvasType!==undefined&&!['pc','mobile'].includes(n.canvasType))errors.push(`节点类型不正确：${n.title}`);
     if (![n.x,n.y].every(Number.isFinite)) errors.push(`画布位置不正确：${n.title}`);
     if (n.rule && typeof model.rules?.[n.rule]!=='string') errors.push(`页面规则不存在：${n.title}`);
+    if(n.canvas!==undefined&&typeof n.canvas!=='boolean')errors.push(`页面画布设置不正确：${n.title}`);
     if(n.overview!==undefined&&typeof n.overview!=='boolean')errors.push(`页面概览设置不正确：${n.title}`);
     if(n.presentation!==undefined&&(n.presentation!=='branch'||n.kind!=='note'))errors.push(`分支节点格式不正确：${n.title}`);
     if(n.section&&!model.modules.find(m=>m.id===n.module)?.sections?.some(s=>s.id===n.section))errors.push(`页面分区不存在：${n.title}`);
@@ -378,23 +431,76 @@ export function validate(model) {
     if(!Array.isArray(model.groups))errors.push('编组格式不正确');
     else {const groupIds=new Set();for(const group of model.groups){if(!group.id||groupIds.has(group.id)||!modules.has(group.module)||!Array.isArray(group.nodes)||group.nodes.length<2||new Set(group.nodes).size!==group.nodes.length||group.nodes.some(id=>!ids.has(id)))errors.push('编组关联页面不正确');groupIds.add(group.id);}}
   }
-  if(model.flows!==undefined){
-    const seen=new Set();if(!Array.isArray(model.flows))errors.push('体验流程格式不正确');
-    else for(const flow of model.flows){if(!flow.id||seen.has(flow.id)||typeof flow.title!=='string'||!ids.has(flow.entry)||isBranch(model.nodes.find(n=>n.id===flow.entry))||flow.context!==undefined&&!isFlowContext(flow.context))errors.push('体验流程入口或条件不正确');seen.add(flow.id);}
+  for(const field of ["flows","experiences"])if(model[field]!==undefined){
+    const seen=new Set();if(!Array.isArray(model[field]))errors.push('体验流程格式不正确');
+    else for(const flow of model[field]){if(!flow.id||seen.has(flow.id)||typeof flow.title!=='string'||!ids.has(flow.entry)||isBranch(model.nodes.find(n=>n.id===flow.entry))||flow.context!==undefined&&!isFlowContext(flow.context))errors.push('体验流程入口或条件不正确');seen.add(flow.id);}
   }
   if(descriptionImagePaths(model).some(path=>!isImagePath(path)))errors.push('说明图片需使用项目 assets 目录中的 PNG、JPEG 或 WebP 文件');
   return errors;
 }
 export function overviewEdges(model) {
-  const visible=new Set(model.nodes.filter(n=>n.overview!==false).map(n=>n.id));
+  const visible=new Set(model.nodes.filter(n=>n.overview!==false&&n.canvas!==false).map(n=>n.id));
   const aliases=new Map(model.nodes.filter(n=>n.overviewAlias).map(n=>[n.id,n.overviewAlias]));
   return model.edges.filter(e=>!e.navigation&&e.overview!==false).map(e=>e.canvasFrom||aliases.has(e.from)||aliases.has(e.to)?{...e,from:e.canvasFrom||aliases.get(e.from)||e.from,to:aliases.get(e.to)||e.to}:e).filter(e=>e.from!==e.to&&visible.has(e.from)&&visible.has(e.to));
 }
-export function removeConnections(model,ids) {
+function dropConnections(model,ids) {
   const removed=new Set(ids);
   model.edges=model.edges.filter(edge=>!removed.has(edge.id));
   model.annotations=model.annotations.filter(annotation=>!removed.has(annotation.edge));
 }
+// 分叉只改变画布结构。移除连接点时接回其前后关系，不删除实际页面跳转。
+export function dissolveBranch(model,id){
+  const branch=model.nodes.find(n=>n.id===id);if(!isBranch(branch))return false;
+  const from=edge=>edge.canvasFrom||edge.from,incoming=model.edges.filter(e=>e.to===id&&from(e)!==id),outgoing=model.edges.filter(e=>from(e)===id&&e.to!==id),byId=new Map(model.nodes.map(n=>[n.id,n]));
+  const resolve=value=>byId.get(value)?.overviewAlias||value;
+  const heads=[...new Map(incoming.map(e=>[from(e),e])).values()];
+  if(!heads.length){const sources=[...new Set(outgoing.filter(e=>e.canvasFrom===id&&e.from!==id).map(e=>resolve(e.from)))];if(sources.length===1)heads.push({from:sources[0]});else if(model.edges.some(e=>e.from===id))return false;}
+  const headFor=edge=>heads.find(e=>resolve(from(e))===resolve(edge.from))||heads[0];
+  if(outgoing.some(edge=>heads.some(head=>from(head)===edge.to)))return false;
+  const notes=[branch.title,model.rules?.[branch.rule]||branch.description,...incoming.flatMap(e=>[e.condition||e.label,model.rules?.[e.rule]||e.description])].filter(text=>typeof text==='string'&&text.trim());
+  for(const edge of outgoing){
+    const old=clone(edge),head=headFor(old),origin=head&&from(head);
+    const attach=(target,parent)=>{
+      const source=parent&&from(parent);
+      if(target.from===id)target.from=source;
+      if(target.canvasFrom===id){if(isBranch(byId.get(source)))target.canvasFrom=source;else delete target.canvasFrom;}
+      if(parent){
+        if(parent.fromSide)target.fromSide=parent.fromSide;else delete target.fromSide;
+        if(Array.isArray(parent.waypoints)||Array.isArray(old.waypoints))target.waypoints=[...(parent.waypoints||[]).map(p=>[...p]),[branch.x+8,branch.y+8],...(old.waypoints||[]).map(p=>[...p])];
+        else delete target.waypoints;
+      }else{delete target.fromSide;delete target.waypoints;}
+    };
+    attach(edge,head);
+    if(old.from===id)for(const parent of heads)if(from(parent)!==origin){const extra={...clone(old),id:uid('edge')};attach(extra,parent);model.edges.push(extra);}
+  }
+  // 下游再次分叉后，实际边的 from 仍可能引用上游连接点。
+  const fallback=heads[0]&&from(heads[0]);
+  for(const edge of model.edges)if(edge.from===id&&edge.canvasFrom!==id&&edge.canvasFrom)edge.from=fallback;
+  const removedEdges=new Set(incoming.map(e=>e.id)),successor=outgoing[0];
+  for(const annotation of model.annotations||[]){
+    if(annotation.node!==id&&!removedEdges.has(annotation.edge))continue;
+    if(successor){annotation.edge=successor.id;delete annotation.node;delete annotation.point;delete annotation.selector;delete annotation.offset;}
+  }
+  if(successor){const retained=new Set([successor.condition,successor.label,...(model.annotations||[]).filter(a=>a.edge===successor.id).map(a=>a.text)]);const text=[...new Set(notes)].filter(note=>!retained.has(note)).join('\n\n');if(text){model.annotations??=[];model.annotations.push({id:uid('annotation'),edge:successor.id,text});}}
+  model.edges=model.edges.filter(e=>!removedEdges.has(e.id));model.nodes=model.nodes.filter(n=>n.id!==id);
+  model.annotations=(model.annotations||[]).filter(a=>a.node!==id&&!removedEdges.has(a.edge));
+  for(const positions of Object.values(model.referencePositions||{}))delete positions[id];if(model.recyclePositions)delete model.recyclePositions[id];
+  if(model.groups)model.groups=model.groups.map(group=>({...group,nodes:group.nodes.filter(value=>value!==id)})).filter(group=>group.nodes.length>1);
+  return true;
+}
+export function normalizeBranchJunctions(model){
+  const removed=[];let changed=true;
+  while(changed){changed=false;const byId=new Map(model.nodes.map(n=>[n.id,n])),resolve=id=>byId.get(id)?.overviewAlias||id;
+    for(const branch of model.nodes.filter(isBranch)){
+      const incoming=model.edges.filter(e=>e.to===branch.id),outgoing=model.edges.filter(e=>(e.canvasFrom||e.from)===branch.id),sources=new Set(incoming.map(e=>resolve(e.canvasFrom||e.from))),targets=new Set(outgoing.map(e=>resolve(e.to)));
+      const empty=!branch.title?.trim()&&!branch.description?.trim()&&!branch.rule&&!(model.annotations||[]).some(a=>a.node===branch.id);
+      const redundant=sources.size===1&&targets.size===1||!outgoing.length&&empty||!incoming.length&&outgoing.some(e=>e.canvasFrom===branch.id&&e.from!==branch.id);
+      if(redundant&&dissolveBranch(model,branch.id)){removed.push(branch.id);changed=true;break;}
+    }
+  }
+  return removed;
+}
+export function removeConnections(model,ids){dropConnections(model,ids);normalizeBranchJunctions(model);}
 export function compactCanvas(model,moduleId) {
   const nodes=moduleNodes(model,moduleId);
   for(const [axis,size,gap] of [['x',canvasNodeWidth,80],['y',canvasNodeHeight,100]]){
@@ -418,15 +524,17 @@ export function compactCanvas(model,moduleId) {
 }
 export function removeNodes(model,ids) {
   const removed=new Set(ids);
-  removeConnections(model,model.edges.filter(e=>removed.has(e.from)||removed.has(e.to)||removed.has(e.canvasFrom)).map(e=>e.id));
+  for(const id of ids)if(isBranch(model.nodes.find(n=>n.id===id))){dissolveBranch(model,id);removed.delete(id);}
+  dropConnections(model,model.edges.filter(e=>removed.has(e.from)||removed.has(e.to)||removed.has(e.canvasFrom)).map(e=>e.id));
   model.annotations=model.annotations.filter(a=>!removed.has(a.node));model.nodes=model.nodes.filter(n=>!removed.has(n.id));
   for(const n of model.nodes)if(removed.has(n.overviewAlias))delete n.overviewAlias;
   for(const positions of Object.values(model.referencePositions||{}))for(const id of removed)delete positions[id];
   for(const id of removed)if(model.recyclePositions)delete model.recyclePositions[id];
   if(model.groups)model.groups=model.groups.map(group=>({...group,nodes:group.nodes.filter(id=>!removed.has(id))})).filter(group=>group.nodes.length>1);
   for(const module of model.modules)if(removed.has(module.entry)){const entry=model.nodes.find(n=>n.module===module.id&&n.overview!==false&&!isBranch(n))?.id;if(entry)module.entry=entry;else delete module.entry;}
-  if(model.flows)model.flows=model.flows.filter(flow=>model.nodes.some(n=>n.id===flow.entry));
+  for(const field of ["flows","experiences"])if(model[field])model[field]=model[field].filter(flow=>model.nodes.some(n=>n.id===flow.entry));
   for(const module of model.modules)if(module.entry&&!model.nodes.some(n=>n.id===module.entry))delete module.entry;
+  normalizeBranchJunctions(model);
 }
 export function removeCanvasNodes(model,moduleId,ids){
   const selected=new Set(ids),byId=new Map(model.nodes.map(n=>[n.id,n])),references=new Set(model.nodes.filter(n=>n.module!==moduleId&&selected.has(n.id)).map(n=>n.id));
@@ -438,14 +546,14 @@ export function removeCanvasNodes(model,moduleId,ids){
   removeNodes(model,model.nodes.filter(n=>n.module===moduleId&&selected.has(n.id)).map(n=>n.id));
 }
 export function moduleNodes(model, moduleId) {
-  const own = model.nodes.filter(n => n.module === moduleId&&n.overview!==false), ownIds = new Set(own.map(n=>n.id));
+  const own = model.nodes.filter(n => n.module === moduleId&&n.overview!==false&&n.canvas!==false), ownIds = new Set(own.map(n=>n.id));
   const refs = [...new Set(overviewEdges(model).filter(e=>ownIds.has(e.from) && !ownIds.has(e.to)).map(e=>e.to))];
   let y=60;const x=Math.max(500,...own.map(n=>n.x+canvasNodeWidth(n)+80));
   return [...own, ...refs.map(id=>{const n=model.nodes.find(n=>n.id===id),position=model.referencePositions?.[moduleId]?.[id],r={...n,x:position?.x??x,y:position?.y??y,reference:true};y+=canvasNodeHeight(n)+70;return r;})];
 }
 export function recycleNodes(model){
   const rank=new Map(model.modules.map((m,i)=>[m.id,i]));
-  return model.nodes.filter(n=>n.overview===false&&!isBranch(n)&&rank.has(n.module)).sort((a,b)=>rank.get(a.module)-rank.get(b.module)||(a.y||0)-(b.y||0)||(a.x||0)-(b.x||0));
+  return model.nodes.filter(n=>n.overview===false&&n.canvas!==false&&!isBranch(n)&&rank.has(n.module)).sort((a,b)=>rank.get(a.module)-rank.get(b.module)||(a.y||0)-(b.y||0)||(a.x||0)-(b.x||0));
 }
 export function recycleCanvasNodes(model){
   const nodes=recycleNodes(model),result=[];let y=60;
@@ -471,7 +579,7 @@ export function exportSubset(model, moduleId) {
   result.annotations=result.annotations.filter(a=>a.edge ? edgeIds.has(a.edge) : keep.has(a.node));
   const ms=new Set(result.nodes.map(n=>n.module));
   result.modules=result.modules.filter(m=>m.id===moduleId||ms.has(m.id)); result.entryModule=moduleId;
-  if(result.flows)result.flows=result.flows.filter(flow=>keep.has(flow.entry));
+  for(const field of ["flows","experiences"])if(result[field])result[field]=result[field].filter(flow=>keep.has(flow.entry));
   const moduleIds=new Set(result.modules.map(m=>m.id));
   if(result.groups)result.groups=result.groups.filter(g=>moduleIds.has(g.module)).map(g=>({...g,nodes:g.nodes.filter(id=>keep.has(id))})).filter(g=>g.nodes.length>1);
   if(result.recyclePositions)result.recyclePositions=Object.fromEntries(Object.entries(result.recyclePositions).filter(([id])=>keep.has(id)));

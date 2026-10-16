@@ -46,9 +46,9 @@ export async function loadProjectExtension(directory){
   if(config.files.at(-1)!==config.entry)throw new Error('扩展入口必须位于清单末尾');
   return {root,entry:config.entry,files:config.files,declarative:config.declarative===true};
 }
-async function extensionSource(extension,file){
+async function extensionSource(extension,file,basePath=""){
   const source=await fs.readFile(await safePath(extension.root,file),'utf8');
-  return source.replace(/\bfrom\s*(['"])(\.\/[^'"]+)\1/g,(match,quote,relative)=>`from ${quote}/project-extension/${path.posix.normalize(path.posix.join(path.posix.dirname(file),relative))}${quote}`);
+  return source.replace(/\bfrom\s*(['"])(\.\/[^'"]+)\1/g,(match,quote,relative)=>`from ${quote}${basePath}/project-extension/${path.posix.normalize(path.posix.join(path.posix.dirname(file),relative))}${quote}`);
 }
 function freeze(text){return text.replace(/<script\b[\s\S]*?<\/script\s*>/gi,'').replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,'').replace(/contenteditable="true"/g,'contenteditable="false"');}
 function assertDeclarativeOffline(text,label){
@@ -106,14 +106,14 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const strip=text=>text.replace(/^import[^\n]+\n/gm,''),inline=text=>text.replace(/<\/script/gi,'<\\/script');
   const css=await fs.readFile(path.join(tool,'style.css'),'utf8'),core=strip(await fs.readFile(path.join(tool,'core.mjs'),'utf8')),routing=strip(await fs.readFile(path.join(tool,'routing.mjs'),'utf8')),player=strip(await fs.readFile(path.join(tool,'player.mjs'),'utf8')),library=strip(await fs.readFile(path.join(tool,'library.mjs'),'utf8')),app=strip(await fs.readFile(path.join(tool,'app.mjs'),'utf8'));
   const extensionCode=projectExtension?(await Promise.all(projectExtension.files.map(async file=>fs.readFile(await safePath(projectExtension.root,file),'utf8')))).map(strip).join('\n'):strip(await fs.readFile(path.join(tool,'extension.mjs'),'utf8'));
-  const vendors=(await Promise.all(['libavoid.min.js','libavoid-routing.js'].map(name=>fs.readFile(path.join(tool,'vendor',name),'utf8')))).join('\n');
-  const licenses=(await Promise.all(['LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE','README.md'].map(name=>fs.readFile(path.join(tool,'vendor',name),'utf8')))).join('\n\n');
+  const vendors=(await Promise.all(['libavoid.min.js','libavoid-routing.js'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n');
+  const licenses=(await Promise.all(['LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE','THIRD-PARTY-README.md'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n\n');
   const data=JSON.stringify({readonly:true,view,flow,bundle:{model,resources,fragments,images}}).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
   let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([routing,core,player,library,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
   return html;
 }
 async function body(req){const parts=[];let bytes=0;for await(const part of req){const buffer=Buffer.isBuffer(part)?part:Buffer.from(part);bytes+=buffer.length;if(bytes>64*1024*1024)throw new Error('图片或数据过大');parts.push(buffer);}return JSON.parse(Buffer.concat(parts,bytes).toString('utf8')||'{}');}
-export function createHandler(store,token){return async(req,res)=>{
+export function createHandler(store,token,{basePath="",projectId,projects}={}){return async(req,res)=>{
   const send=(status,data,type='application/json')=>{res.writeHead(status,{'Content-Type':type+'; charset=utf-8','Cache-Control':'no-store'});res.end(type==='application/json'?JSON.stringify(data):data);};
   try{const url=new URL(req.url,'http://localhost');const host=req.headers.host||'';if(!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))return send(403,{error:'仅允许本机访问'});
     if(['PUT','POST'].includes(req.method)){if(req.headers.authorization!==`Bearer ${token}`||req.headers.origin&&new URL(req.headers.origin).host!==host)return send(403,{error:'请求来源不正确'});}
@@ -122,10 +122,10 @@ export function createHandler(store,token){return async(req,res)=>{
     if(req.method==='PUT'&&url.pathname==='/api/project'){const data=await body(req);return send(200,await store.save(data.model,data.revision));}
     if(req.method==='POST'&&url.pathname==='/api/image')return send(200,await store.upload(await body(req)));
     if(req.method==='POST'&&url.pathname==='/api/export'){await store.check();return send(200,await standalone(await store.load(),{...await body(req),extension:store.extension}),'text/html');}
-    if(req.method==='GET'&&url.pathname==='/'){let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<script type="module" src="/app.mjs">',`<script>globalThis.YUANXING_BOOT={token:${JSON.stringify(token)}};</script><script type="module" src="/app.mjs">`);return send(200,html,'text/html');}
-    if(req.method==='GET'&&url.pathname==='/extension.mjs')return send(200,store.extension?await extensionSource(store.extension,store.extension.entry):await fs.readFile(path.join(tool,'extension.mjs'),'utf8'),'text/javascript');
-    if(req.method==='GET'&&url.pathname.startsWith('/project-extension/')){const file=url.pathname.slice('/project-extension/'.length);if(!store.extension?.files.includes(file))return send(404,{error:'扩展资源不存在'});return send(200,await extensionSource(store.extension,file),'text/javascript');}
-    if(req.method==='GET'&&['/app.mjs','/core.mjs','/routing.mjs','/library.mjs','/player.mjs','/style.css','/vendor/libavoid.min.js','/vendor/libavoid-routing.js'].includes(url.pathname))return send(200,await fs.readFile(path.join(tool,url.pathname.slice(1)),'utf8'),url.pathname.endsWith('.css')?'text/css':'text/javascript');
+    if(req.method==='GET'&&url.pathname==='/'){let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<script type="module" src="/app.mjs">',`<script>globalThis.YUANXING_BOOT={...${JSON.stringify({token,basePath,projectId,projects}).replace(/</g,"\\u003c")}};</script><script type="module" src="/app.mjs">`);if(basePath)html=html.replace('href="/style.css"',`href="${basePath}/style.css"`).replace('src="/app.mjs"',`src="${basePath}/app.mjs"`);return send(200,html,'text/html');}
+    if(req.method==='GET'&&url.pathname==='/extension.mjs')return send(200,store.extension?await extensionSource(store.extension,store.extension.entry,basePath):await fs.readFile(path.join(tool,'extension.mjs'),'utf8'),'text/javascript');
+    if(req.method==='GET'&&url.pathname.startsWith('/project-extension/')){const file=url.pathname.slice('/project-extension/'.length);if(!store.extension?.files.includes(file))return send(404,{error:'扩展资源不存在'});return send(200,await extensionSource(store.extension,file,basePath),'text/javascript');}
+    if(req.method==='GET'&&['/app.mjs','/core.mjs','/routing.mjs','/library.mjs','/player.mjs','/style.css','/libavoid.min.js','/libavoid-routing.js'].includes(url.pathname))return send(200,await fs.readFile(path.join(tool,url.pathname.slice(1)),'utf8'),url.pathname.endsWith('.css')?'text/css':'text/javascript');
     send(404,{error:'入口不存在'});
   }catch(error){const detail=String(error.stderr||'').match(/ValueError:\s*([\s\S]*)/)?.[1]?.trim();send(error.status||400,{error:detail||error.message});}
 };}
