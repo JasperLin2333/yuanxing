@@ -68,7 +68,7 @@ node scripts/yuanxing.mjs init ./my-iteration --template iteration
 node scripts/yuanxing.mjs serve --root ./my-iteration --open
 ```
 
-打开后可以拖动页面、整理连线、绑定点击区域、打点批注。你的 AI 助手可直接读取 [SKILL.md](SKILL.md)，继续修改 `my-iteration` 中的页面与流程。
+打开后可以拖动页面、整理连线、绑定点击区域、打点批注。顶栏点击「完整原型」即可从流程入口连续体验；点击「流程画布」或按 Esc 返回，保留原来的画布位置与缩放。你的 AI 助手可直接读取 [SKILL.md](SKILL.md)，继续修改 `my-iteration` 中的页面与流程。
 
 手动安装到现有 AI 宿主的命令见下文。
 

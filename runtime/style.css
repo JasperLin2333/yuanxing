@@ -294,3 +294,11 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .experience #page-viewport{padding:20px;min-height:0}
 .experience #project-title{max-width:40%}
 .experience .hotspot:hover{background:transparent;outline:none}
+
+/* 两种视图的切换始终可见。 */
+#view-switch{display:flex;flex:none;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--radius);background:var(--soft)}
+#view-switch button{min-height:28px;padding:3px 12px;color:var(--muted)}
+#view-switch button[aria-pressed="true"]{background:var(--surface);color:var(--selected-ink);box-shadow:0 1px 3px #14141414}
+#view-switch button:disabled{color:var(--disabled)}
+#experience-tools{display:flex;align-items:center;gap:8px}
+#experience-flow{width:auto;min-width:120px;max-width:240px;margin:0}
