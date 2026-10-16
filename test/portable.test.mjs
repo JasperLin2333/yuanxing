@@ -17,13 +17,13 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 async function temporary(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'yuanxing-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
 async function sample(t){const dir=await temporary(t),project=path.join(dir,'项目 with spaces');await fs.cp(path.join(root,'examples/product-iteration'),project,{recursive:true});return project;}
 
-test('案例共用旧截图，根据角色进入不同分支，批注不改变跳转',async t=>{
+test('案例复用旧页面截图，根据角色进入不同分支，批注不改变跳转',async t=>{
   const store=await createStore(await sample(t)),bundle=await store.load(),model=bundle.model;
-  assert.deepEqual(validate(model),[]);assert.equal(model.nodes.filter(n=>n.kind==='image').length,1);
+  assert.deepEqual(validate(model),[]);assert.equal(model.nodes.filter(n=>n.kind==='html').length,4);
   assert.equal(eligibleEdges(model.edges.filter(e=>e.from==='list'),{role:'admin'})[0].to,'assign');
   assert.equal(eligibleEdges(model.edges.filter(e=>e.from==='list'),{role:'member'})[0].to,'permission');
   const before=JSON.stringify(model.edges);model.annotations[0].text='改为管理员权限';assert.equal(JSON.stringify(model.edges),before);
-  assert(bundle.resources.list.startsWith('data:image/png;base64,'));assert.equal(flowEntries(model).length,2);
+  assert(bundle.resources.list.includes('data:image/png;base64,'));assert.equal(flowEntries(model).length,2);
 });
 
 test('从同一来源导出两种离线单文件，所有脚本都能静态解析',async t=>{

@@ -1,6 +1,18 @@
 ---
 name: yuanxing
+slug: yuanxing
+version: 0.2.1
+displayName: 元形 · AI 产品原型工作台
+summary: 复用已有截图和 HTML，用自然语言设计本次变化，在流程画布与完整原型间切换，导出单文件用于评审和体验
 description: 用自然语言制作和修改可交互产品原型，混用已有截图、HTML 与新界面，组织流程画布并导出独立体验原型或评审工作台。适用于产品经理设计新流程、迭代旧产品和准备原型评审；只讨论方案时不生成文件，不用于直接交付生产应用。
+tags:
+  - 产品设计
+  - 原型
+  - 产品经理
+  - 流程画布
+  - HTML
+license: MIT
+homepage: https://jasperlin2333.github.io/yuanxing/
 ---
 
 # 元形

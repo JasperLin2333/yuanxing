@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs runtime/routing.test.mjs",
     "check": "node scripts/yuanxing.mjs check --root examples/product-iteration",
+    "pack": "node scripts/pack.mjs",
     "demo": "node scripts/yuanxing.mjs serve --root examples/product-iteration --open",
     "build:demo": "node scripts/yuanxing.mjs export --root examples/product-iteration --view review --out demo/review.html --replace && node scripts/yuanxing.mjs export --root examples/product-iteration --view prototype --out demo/prototype.html --replace"
   },

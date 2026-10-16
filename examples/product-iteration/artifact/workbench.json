@@ -18,8 +18,8 @@
       "id": "list",
       "module": "assignment",
       "title": "已有客户列表",
-      "kind": "image",
-      "path": "assets/customer-list.png",
+      "kind": "html",
+      "path": "pages/customers.html",
       "width": 1280,
       "height": 800,
       "x": 60,
@@ -69,13 +69,7 @@
       "from": "list",
       "to": "assign",
       "label": "管理员：分配客户",
-      "rect": [
-        0.8671875,
-        0.13,
-        0.0953125,
-        0.055
-      ],
-      "imagePath": "assets/customer-list.png",
+      "selector": "[data-yx-id=\"assign-entry\"]",
       "when": {
         "role": "admin"
       }
@@ -85,13 +79,7 @@
       "from": "list",
       "to": "permission",
       "label": "普通成员：分配客户",
-      "rect": [
-        0.8671875,
-        0.13,
-        0.0953125,
-        0.055
-      ],
-      "imagePath": "assets/customer-list.png",
+      "selector": "[data-yx-id=\"assign-entry\"]",
       "when": {
         "role": "member"
       }
@@ -150,11 +138,15 @@
     {
       "id": "note-scope",
       "node": "list",
+      "selector": "[data-yx-id=\"assign-entry\"]",
+      "offset": [
+        0.5,
+        0.5
+      ],
       "point": [
         0.93,
         0.155
       ],
-      "imagePath": "assets/customer-list.png",
       "text": "本次新增入口。列表与其他模块沿用原产品。"
     },
     {
