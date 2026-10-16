@@ -289,6 +289,7 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 #experience-flow{min-width:120px;max-width:240px}
 #page-stage>.page-frame{pointer-events:auto}
 .experience .layout{grid-template-columns:minmax(0,1fr)}
+.experience #workspace{grid-column:1}
 .experience #sidebar,.experience #inspector,.experience .panel-toggle,.experience #edit-tools,.experience #export-menu,.experience .zoom-tools,.experience .viewer-toolbar,.experience #module-title{display:none!important}
 .experience #page-viewport{padding:20px;min-height:0}
 .experience #project-title{max-width:40%}
