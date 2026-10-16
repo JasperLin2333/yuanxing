@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "title": "已有产品迭代 · 客户分配",
+  "entryModule": "assignment",
+  "contextDefaults": {
+    "role": "admin",
+    "assignee": ""
+  },
+  "modules": [
+    {
+      "id": "assignment",
+      "title": "客户分配",
+      "entry": "list"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "list",
+      "module": "assignment",
+      "title": "已有客户列表",
+      "kind": "image",
+      "path": "assets/customer-list.png",
+      "width": 1280,
+      "height": 800,
+      "x": 60,
+      "y": 60,
+      "description": "复用已有产品截图。本次仅增加分配入口及后续流程。"
+    },
+    {
+      "id": "assign",
+      "module": "assignment",
+      "title": "分配客户",
+      "kind": "html",
+      "path": "pages/assign.html",
+      "width": 1280,
+      "height": 800,
+      "x": 560,
+      "y": 60,
+      "description": "管理员选择负责成员后确认。"
+    },
+    {
+      "id": "success",
+      "module": "assignment",
+      "title": "分配完成",
+      "kind": "html",
+      "path": "pages/success.html",
+      "width": 1280,
+      "height": 800,
+      "x": 1060,
+      "y": 60,
+      "description": "展示本次选择的负责成员。"
+    },
+    {
+      "id": "permission",
+      "module": "assignment",
+      "title": "普通成员提示",
+      "kind": "html",
+      "path": "pages/permission.html",
+      "width": 1280,
+      "height": 800,
+      "x": 560,
+      "y": 470,
+      "description": "普通成员进入同一入口时展示权限边界。"
+    }
+  ],
+  "edges": [
+    {
+      "id": "open-admin",
+      "from": "list",
+      "to": "assign",
+      "label": "管理员：分配客户",
+      "rect": [
+        0.8671875,
+        0.13,
+        0.0953125,
+        0.055
+      ],
+      "imagePath": "assets/customer-list.png",
+      "when": {
+        "role": "admin"
+      }
+    },
+    {
+      "id": "open-member",
+      "from": "list",
+      "to": "permission",
+      "label": "普通成员：分配客户",
+      "rect": [
+        0.8671875,
+        0.13,
+        0.0953125,
+        0.055
+      ],
+      "imagePath": "assets/customer-list.png",
+      "when": {
+        "role": "member"
+      }
+    },
+    {
+      "id": "confirm",
+      "from": "assign",
+      "to": "success",
+      "label": "确认分配",
+      "selector": "[data-yx-id=\"confirm\"]"
+    },
+    {
+      "id": "cancel",
+      "from": "assign",
+      "to": "list",
+      "label": "取消",
+      "selector": "[data-yx-id=\"cancel\"]",
+      "overview": false
+    },
+    {
+      "id": "back",
+      "from": "success",
+      "to": "list",
+      "label": "返回列表",
+      "selector": "[data-yx-id=\"back\"]",
+      "overview": false
+    },
+    {
+      "id": "back-member",
+      "from": "permission",
+      "to": "list",
+      "label": "返回列表",
+      "selector": "[data-yx-id=\"back\"]",
+      "overview": false
+    }
+  ],
+  "flows": [
+    {
+      "id": "admin",
+      "title": "管理员分配客户",
+      "entry": "list",
+      "context": {
+        "role": "admin"
+      }
+    },
+    {
+      "id": "member",
+      "title": "普通成员访问",
+      "entry": "list",
+      "context": {
+        "role": "member"
+      }
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-scope",
+      "node": "list",
+      "point": [
+        0.93,
+        0.155
+      ],
+      "imagePath": "assets/customer-list.png",
+      "text": "本次新增入口。列表与其他模块沿用原产品。"
+    },
+    {
+      "id": "note-assignee",
+      "node": "assign",
+      "selector": "#assignee",
+      "point": [
+        0.5,
+        0.5
+      ],
+      "offset": [
+        0.5,
+        0.5
+      ],
+      "text": "选择负责成员后确认分配。此处是普通评审批注。"
+    }
+  ]
+}

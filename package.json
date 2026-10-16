@@ -1,0 +1,17 @@
+{
+  "name": "yuanxing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "面向产品经理的 AI 原型工作台与通用 Skill",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs runtime/routing.test.mjs",
+    "check": "node scripts/yuanxing.mjs check --root examples/product-iteration",
+    "demo": "node scripts/yuanxing.mjs serve --root examples/product-iteration --open",
+    "build:demo": "node scripts/yuanxing.mjs export --root examples/product-iteration --view review --out demo/review.html --replace && node scripts/yuanxing.mjs export --root examples/product-iteration --view prototype --out demo/prototype.html --replace"
+  },
+  "license": "MIT"
+}

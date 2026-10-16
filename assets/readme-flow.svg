@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">元形：复用旧界面，设计新流程</title>
+  <desc id="desc">已有列表截图连接到新增分配表单和完成页，普通成员进入权限分支。下方展示流程评审与独立体验共用一份设计。</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#dce4df"/></pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#7c8c83" stroke-width="1.5"/></marker>
+  </defs>
+  <rect width="1280" height="640" rx="20" fill="#f5f8f5"/>
+  <rect x="1" y="1" width="1278" height="638" rx="19" fill="none" stroke="#dfe8e1"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+    <rect x="28" y="28" width="42" height="42" rx="12" fill="#18a45c"/>
+    <path d="M39 40h9v9h10v10H48V49h-9z" stroke="white" stroke-width="2" fill="none"/>
+    <text x="84" y="57" fill="#263c2f" font-size="25" font-weight="700">元形 Yuanxing</text>
+    <text x="1250" y="55" text-anchor="end" fill="#6c7d72" font-size="16">复用旧界面 · 设计新流程</text>
+    <rect x="28" y="94" width="1224" height="420" rx="12" fill="url(#grid)" stroke="#dfe8e1"/>
+    <g transform="translate(64 140)">
+      <rect width="300" height="244" rx="9" fill="white" stroke="#d8e2db"/>
+      <path d="M9 0h282a9 9 0 0 1 9 9v30H0V9a9 9 0 0 1 9-9" fill="#edf2ee"/>
+      <text x="16" y="25" fill="#354d3d" font-size="14" font-weight="600">已有客户列表</text>
+      <rect x="222" y="11" width="62" height="20" rx="4" fill="#dfe8e1"/>
+      <text x="253" y="25" text-anchor="middle" fill="#65796c" font-size="11">旧截图</text>
+      <rect x="16" y="56" width="55" height="156" rx="3" fill="#f1f4f2"/>
+      <rect x="24" y="68" width="39" height="7" rx="3" fill="#c6d4cb"/>
+      <rect x="22" y="91" width="43" height="18" rx="3" fill="#dceee3"/>
+      <path d="M26 122h33M26 142h29" stroke="#d3dcd6" stroke-width="5"/>
+      <text x="84" y="70" fill="#344b3d" font-size="13">客户列表</text>
+      <rect x="213" y="54" width="70" height="26" rx="4" fill="#18a45c"/>
+      <text x="248" y="72" text-anchor="middle" fill="white" font-size="11">分配客户</text>
+      <rect x="83" y="94" width="199" height="24" rx="3" fill="#f0f4f1"/>
+      <text x="93" y="110" fill="#7b8c80" font-size="10">客户名称</text><text x="224" y="110" fill="#7b8c80" font-size="10">所属成员</text>
+      <rect x="83" y="124" width="199" height="26" rx="3" fill="#edf8f1"/>
+      <text x="93" y="142" fill="#344b3d" font-size="11">清禾设计</text><text x="231" y="142" fill="#18a45c" font-size="10">待分配</text>
+      <path d="M84 164h198M84 192h198" stroke="#e5ece7"/>
+      <text x="93" y="181" fill="#7b8c80" font-size="10">远山商贸</text><text x="93" y="209" fill="#7b8c80" font-size="10">知行文化</text>
+    </g>
+    <path d="M364 262H477" stroke="#7c8c83" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <text x="420" y="247" text-anchor="middle" fill="#65796c" font-size="13">管理员</text>
+    <g transform="translate(486 140)">
+      <rect width="300" height="244" rx="9" fill="white" stroke="#b7d8c3"/>
+      <path d="M9 0h282a9 9 0 0 1 9 9v30H0V9a9 9 0 0 1 9-9" fill="#e5f4eb"/>
+      <text x="16" y="25" fill="#244c34" font-size="14" font-weight="600">新增分配表单</text>
+      <text x="282" y="25" text-anchor="end" fill="#41885b" font-size="11">HTML</text>
+      <text x="24" y="77" fill="#344b3d" font-size="18" font-weight="600">分配客户</text>
+      <text x="24" y="106" fill="#829088" font-size="12">为清禾设计指定一位负责成员</text>
+      <text x="24" y="139" fill="#65796c" font-size="12">分配给</text>
+      <rect x="24" y="150" width="252" height="34" rx="5" fill="white" stroke="#d5e0d8"/>
+      <text x="36" y="172" fill="#344b3d" font-size="13">顾言</text><path d="m253 165 5 5 5-5" stroke="#7c8c83" fill="none"/>
+      <rect x="190" y="201" width="86" height="28" rx="4" fill="#18a45c"/>
+      <text x="233" y="220" text-anchor="middle" fill="white" font-size="12">确认分配</text>
+    </g>
+    <path d="M786 262H899" stroke="#7c8c83" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <text x="842" y="247" text-anchor="middle" fill="#65796c" font-size="13">确认</text>
+    <g transform="translate(908 140)">
+      <rect width="300" height="244" rx="9" fill="white" stroke="#d8e2db"/>
+      <path d="M9 0h282a9 9 0 0 1 9 9v30H0V9a9 9 0 0 1 9-9" fill="#edf2ee"/>
+      <text x="16" y="25" fill="#354d3d" font-size="14" font-weight="600">分配完成</text>
+      <circle cx="150" cy="90" r="23" fill="#e7f6ed"/>
+      <path d="m140 90 7 7 14-15" fill="none" stroke="#18a45c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="150" y="140" text-anchor="middle" fill="#344b3d" font-size="18" font-weight="600">客户已分配</text>
+      <text x="150" y="169" text-anchor="middle" fill="#7b8c80" font-size="13">所属成员：顾言</text>
+      <text x="150" y="213" text-anchor="middle" fill="#18a45c" font-size="12">返回客户列表</text>
+    </g>
+    <path d="M214 384V453H477" stroke="#9aa99f" stroke-width="2" fill="none" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+    <text x="290" y="439" fill="#7c8c83" font-size="13">普通成员</text>
+    <rect x="486" y="420" width="300" height="66" rx="8" fill="#fffdf8" stroke="#e5d8bc"/>
+    <circle cx="512" cy="453" r="12" fill="#f5ead2"/><text x="512" y="458" text-anchor="middle" fill="#a68139" font-size="15" font-weight="700">!</text>
+    <text x="535" y="450" fill="#74664b" font-size="14" font-weight="600">需要管理员权限</text>
+    <text x="535" y="471" fill="#a09279" font-size="11">关键分支在同一张画布中说明</text>
+    <g transform="translate(170 548)">
+      <rect width="430" height="58" rx="10" fill="white" stroke="#dfe8e1"/>
+      <text x="24" y="35" fill="#244c34" font-size="18" font-weight="600">流程评审</text>
+      <text x="132" y="35" fill="#7b8c80" font-size="14">看关系、讲分支、补说明</text>
+    </g>
+    <path d="M616 577h48m-6-5 6 5-6 5m-36-10-6 5 6 5" stroke="#91a298" stroke-width="1.8" fill="none"/>
+    <g transform="translate(680 548)">
+      <rect width="430" height="58" rx="10" fill="#18a45c"/>
+      <text x="24" y="35" fill="white" font-size="18" font-weight="600">独立体验</text>
+      <text x="132" y="35" fill="#d8f6e5" font-size="14">从入口到结果，连续操作</text>
+    </g>
+  </g>
+</svg>

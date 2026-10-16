@@ -1,0 +1,4 @@
+interface:
+  display_name: "元形 · AI 原型工作台"
+  short_description: "复用截图与 HTML，用自然语言完成产品流程设计、原型体验与评审"
+  default_prompt: "使用 $yuanxing，基于我已有的产品界面设计本次功能，并生成流程画布和可独立体验的原型。"
