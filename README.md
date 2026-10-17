@@ -70,7 +70,7 @@
 
 对 AI 说：“再建一个用户门户项目，加到当前工作台。”它会创建并登记项目；顶栏切换项目，各自保存页面、画布、批注和导出。
 
-同一产品的多个模块可以组成完整原型，由 AI 串联已设计的按钮与导航。产品设计继续保存在项目目录中，通过共享运行时和项目扩展维护各自的交互。
+同一产品的多个模块可以组成完整原型，由 AI 串联已设计的按钮与导航。不同产品可以独立保存与迭代，在同一个工作台中切换。
 
 <a id="start"></a>
 
@@ -96,16 +96,11 @@ npx skills add JasperLin2333/yuanxing --skill yuanxing
 
 **需要 Node.js 20+。使用你现有的 AI 助手，无需额外配置模型 API Key，也无需安装 npm 运行依赖。**
 
-## 为持续迭代准备的工程能力
+## 为反复打磨准备
 
-| 已有能力 | 可以直接查看的依据 |
-| --- | --- |
-| **156 项自动化测试** | 覆盖连线与分叉、撤销、交互状态、多项目隔离、版本冲突和离线导出：[测试代码](test/) |
-| **同源的两种单文件交付** | 画布与完整原型共用项目数据，导出内嵌所需资源：[导出与独立使用测试](test/portable.test.mjs) |
-| **3 个 Skill 构建通道** | 标准、SkillHub、WorkBuddy 包脱离源码后创建项目、检查和导出：[分发测试](test/distribution.test.mjs) |
-| **共享内核与项目扩展** | 通用运行时统一维护，专用交互随项目保存：[项目格式与扩展](references/project-format.md#项目扩展) |
+画布上的布局、连线和批注可以继续编辑，局部改动保留已有整理；完整原型与导出使用同一份设计，讨论后的修改继续回到源项目。
 
-工作方式与操作细节见[工作台手册](references/workbench.md)，各宿主的能力适配与市场打包见[Agent 接入与分发](references/agent-adaptation.md)。
+项目包含 [156 项自动化测试](test/)，覆盖连线与分叉、撤销、交互状态、多项目隔离、版本冲突和离线导出。日常操作细节见[工作台手册](references/workbench.md)。
 
 <details>
 <summary><strong>先在本地跑一个案例</strong></summary>
@@ -126,7 +121,7 @@ node scripts/yuanxing.mjs init ./my-prototype --name "我的产品"
 </details>
 
 <details>
-<summary><strong>手动安装、导出与开发</strong></summary>
+<summary><strong>手动安装与导出</strong></summary>
 
 把完整 Skill 安装到宿主的技能目录；目标目录存在时会保留原安装并停止：
 
@@ -151,19 +146,6 @@ node scripts/yuanxing.mjs workspace add --workspace ./my-workspace.json --root .
 node scripts/yuanxing.mjs serve --workspace ./my-workspace.json --open
 ```
 
-验证与构建：
-
-```sh
-npm test
-npm run check
-npm run build:demo
-npm run pack:generic
-npm run pack
-npm run pack:workbuddy
-```
-
-市场包分别保存在 `dist/<通道>/yuanxing.zip`。构建格式、宿主接入与市场提交要求见[分发说明](references/agent-adaptation.md#分发与版本)。
-
 </details>
 
 <details>
@@ -180,5 +162,7 @@ npm run pack:workbuddy
 ---
 
 **先拿一个你熟悉的功能试试。** [体验完整原型](https://jasperlin2333.github.io/yuanxing/demo/prototype.html)，或在 [Issues](https://github.com/JasperLin2333/yuanxing/issues) 分享你的具体场景和改进建议。
+
+希望参与开发，可查看[贡献与维护说明](CONTRIBUTING.md)。
 
 主代码采用 [MIT](LICENSE) 许可证；附带组件的来源与许可见[第三方说明](THIRD_PARTY_NOTICES.md)。
