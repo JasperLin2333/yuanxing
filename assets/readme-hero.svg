@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="720" viewBox="0 0 1440 720" role="img" aria-labelledby="title desc">
+  <title id="title">元形 Yuanxing：AI 时代的 Axure</title>
+  <desc id="desc">复用已有截图与 HTML，用自然语言组织同一个可编辑项目。在流程画布中看全局，在完整原型中实际操作，两种视图都能导出离线 HTML。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#183d2b"/><stop offset="1" stop-color="#081d14"/></linearGradient>
+    <linearGradient id="project" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#244d38"/><stop offset="1" stop-color="#163b2a"/></linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#79bc91" opacity=".15"/></pattern>
+  </defs>
+  <rect width="1440" height="720" rx="24" fill="url(#bg)"/>
+  <rect x="724" y="30" width="686" height="660" fill="url(#grid)"/>
+  <g font-family="'PingFang SC','Noto Sans CJK SC','Microsoft YaHei',sans-serif">
+    <rect x="68" y="58" width="50" height="50" rx="14" fill="#20995c"/>
+    <path d="M81 72h12v12h12v12H93V84H81Z" fill="none" stroke="#eff9eb" stroke-width="2.6" stroke-linejoin="round"/>
+    <text x="137" y="92" fill="#e5f0e7" font-size="30" font-weight="600">元形 <tspan fill="#95bca3" font-size="25" letter-spacing="2">YUANXING</tspan></text>
+    <text x="68" y="236" fill="#f4f5e9" font-size="64" font-weight="700">AI 时代的 Axure。</text>
+    <text x="68" y="328" fill="#90dfad" font-size="59" font-weight="700">想清流程，也能体验。</text>
+    <path d="M72 384h60" stroke="#e8c688" stroke-width="4" stroke-linecap="round"/>
+    <text x="72" y="445" fill="#bccfbd" font-size="27">保留已有页面，用自然语言补上变化。</text>
+    <text x="72" y="492" fill="#bccfbd" font-size="27">从入口到结果，把真实操作串起来。</text>
+    <g fill="#ffffff" fill-opacity=".04" stroke="#466b50">
+      <rect x="68" y="585" width="181" height="54" rx="27"/>
+      <rect x="264" y="585" width="181" height="54" rx="27"/>
+      <rect x="460" y="585" width="181" height="54" rx="27"/>
+    </g>
+    <g fill="#bad2bf" font-size="22" text-anchor="middle">
+      <text x="158" y="619">截图 + HTML</text><text x="354" y="619">流程 + 交互</text><text x="550" y="619">本地 + 离线</text>
+    </g>
+    <g fill="#1c3a2c" stroke="#4e7559">
+      <rect x="780" y="157" width="240" height="98" rx="14"/>
+      <rect x="1080" y="157" width="240" height="98" rx="14"/>
+    </g>
+    <g fill="#dcebe0" text-anchor="middle" font-size="29" font-weight="600">
+      <text x="900" y="217">已有截图</text><text x="1200" y="217">HTML 页面</text>
+    </g>
+    <g stroke="#81b28c" stroke-width="2" fill="none">
+      <path d="M900 255v48h300v-48M1050 303v31m-6-8 6 8 6-8"/>
+      <path d="M1050 445v38H900v25m-6-8 6 8 6-8M1050 483h150v25m-6-8 6 8 6-8"/>
+    </g>
+    <rect x="780" y="343" width="540" height="102" rx="18" fill="url(#project)" stroke="#80b48b"/>
+    <text x="1050" y="386" text-anchor="middle" fill="#f2f4e6" font-size="31" font-weight="600">同一份可编辑项目</text>
+    <text x="1050" y="420" text-anchor="middle" fill="#a4c6ac" font-size="23">页面 · 连线 · 交互 · 批注</text>
+    <rect x="780" y="517" width="240" height="93" rx="14" fill="#e4efdc"/>
+    <rect x="1080" y="517" width="240" height="93" rx="14" fill="#85cda0"/>
+    <g text-anchor="middle" fill="#244a32">
+      <text x="900" y="555" font-size="28" font-weight="600">流程画布</text><text x="900" y="588" font-size="21">看全局 · 讲分支</text>
+      <text x="1200" y="555" font-size="28" font-weight="600">完整原型</text><text x="1200" y="588" font-size="21">实际输入 · 连续操作</text>
+    </g>
+    <text x="1050" y="661" text-anchor="middle" fill="#9aba9e" font-size="23">分别导出离线 HTML，发给同事直接体验</text>
+  </g>
+</svg>

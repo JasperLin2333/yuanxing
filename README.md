@@ -1,75 +1,114 @@
 # 元形 Yuanxing
 
-### AI 时代的 Axure，让想法变成可评审、可体验的产品流程。
+**AI 时代的 Axure。用自然语言，把想法变成可评审、可体验的产品流程。**
 
-给已有产品加一个功能，不必先重做整套界面。把现有截图或 HTML 放进来，用自然语言补上本次改动，再把入口、操作、结果和关键分支连成完整流程。
+复用已有截图与 HTML，只设计这次变化。把页面、操作和分支连成流程，随时切换画布与完整原型，再导出一个 HTML 文件交给同事。
 
-**[立即体验原型](https://jasperlin2333.github.io/yuanxing/demo/prototype.html) · [查看流程画布](https://jasperlin2333.github.io/yuanxing/demo/review.html) · [产品介绍](https://jasperlin2333.github.io/yuanxing/) · [开始使用](#start) · [下载离线包](https://github.com/JasperLin2333/yuanxing/releases/latest)**
+**[直接体验](https://jasperlin2333.github.io/yuanxing/demo/prototype.html) · [查看画布](https://jasperlin2333.github.io/yuanxing/demo/review.html) · [开始使用](#start) · [产品介绍](https://jasperlin2333.github.io/yuanxing/) · [查看发布](https://github.com/JasperLin2333/yuanxing/releases/latest)**
 
-![元形工作方式：保留旧页面，生成新交互，在同一份设计中评审流程和体验原型](assets/readme-flow.svg)
+[![元形：截图与 HTML 组成同一份可编辑项目，在流程画布和完整原型间切换](assets/readme-hero.png)](assets/readme-hero.svg)
 
-*工作方式示意：已有页面可以继续用截图，本次变化用 HTML 实现，两者一起组成可操作的用户流程。*
+## 只设计这次变化，也能看清整个流程
 
-## 把时间花在这次要设计的变化上
+旧系统只增加一个弹窗，原型却得从整页复刻开始；AI 生成了几个漂亮页面，评审时还是要口头解释怎么走；方案讨论完了，同事拿到文件却没法实际体验。
 
-你可能正遇到这些情况：旧系统只改一个弹窗，却得先复刻整页；AI 生成了几个页面，评审时仍要靠口头解释它们怎么连起来；方案讨论清楚了，发给同事的文件又无法直接体验。
+元形把这些工作放进同一个原型项目：**不变的页面继续复用，需要变化的部分用 AI 完成，完整的用户路径在画布和原型里表达。**
 
-元形把这些工作放到同一个原型项目里：
-
-| 你要完成的工作 | 用元形怎么做 |
+| 你要推进的工作 | 元形帮你怎么做 |
 | --- | --- |
-| 给旧产品增加功能 | 复用原页面截图或 HTML，只生成需要变化的界面 |
-| 想清楚用户怎么走 | 把页面、操作和关键条件放在流程画布上推演 |
-| 让评审者看懂方案 | 沿着画布讲流程，在页面上打点补充说明 |
-| 让同事实际试一遍 | 切到独立原型，从入口连续操作 |
-| 发给别人继续讨论 | 导出单个 HTML 文件，离线打开即可查看 |
+| **在已有产品上加功能** | 保留截图或 HTML，补上这次改动的页面与交互 |
+| **把流程想清楚、讲明白** | 在画布上组织页面、连线、分支和批注，推演入口到结果 |
+| **让评审者实际试一遍** | 切到完整原型，点击、选择、输入，连续走完已经设计的路径 |
+| **发给同事继续讨论** | 导出单个 HTML，离线打开即可查看和体验 |
 
-新产品也可以从空白开始。你可以让 AI 生成和修改页面，也可以自己拖动、对齐、连线与批注；局部修改保留已有的人工整理。
+新产品也可以从空白开始。你用自然语言描述意图，AI 负责组织页面与交互；你也可以直接拖动、连线、打点批注，继续打磨同一份设计。
 
-## 看一个完整例子
+## 先看全局，再实际操作
 
-**需求：给已有客户列表增加“分配客户”功能。**
+### 流程画布：把入口、分支和结果放在一起
 
-1. 保留旧列表截图，为“分配客户”按钮设置热点。
-2. 新增 HTML 表单，让管理员选择负责成员并确认。
-3. 在结果页展示刚才选择的成员，再返回列表。
-4. 普通成员从同一个入口进入，展示对应权限边界。
+页面关系一眼可见。拖动整理布局、连接操作路径、在页面上打点说明；局部修改保留已有的人工整理。
 
-**[先看整个流程 →](https://jasperlin2333.github.io/yuanxing/demo/review.html)　[直接操作原型 →](https://jasperlin2333.github.io/yuanxing/demo/prototype.html)**
+[![元形公开示例的真实流程画布：已有客户列表连接到分配表单、完成页和普通成员提示](assets/readme-canvas.png)](https://jasperlin2333.github.io/yuanxing/demo/review.html)
 
-在体验页切换“管理员分配客户”和“普通成员访问”，就能查看两条路径。两种视图共用[同一份可编辑项目](examples/product-iteration/)，案例界面与数据均为虚构示例。
+**[打开这个流程画布 →](https://jasperlin2333.github.io/yuanxing/demo/review.html)**
+
+### 完整原型：从入口到结果，像使用产品一样体验
+
+一键切换视图，直接操作页面中的控件。输入、选择和跳转保留真实交互；按 Esc 回到画布，继续推演和讨论。
+
+[![元形公开示例的真实完整原型：从客户列表进入分配表单，实际选择负责成员](assets/readme-prototype.png)](https://jasperlin2333.github.io/yuanxing/demo/prototype.html)
+
+**[直接体验这个原型 →](https://jasperlin2333.github.io/yuanxing/demo/prototype.html)**
+
+截图来自公开的“客户分配”示例，界面与数据均为虚构。两种视图共用[同一份可编辑项目](examples/product-iteration/)。
+
+## 拿一个已有功能，走完一段完整流程
+
+**需求：给已有客户列表增加“分配客户”。**
+
+| 阶段 | 怎么设计 |
+| --- | --- |
+| **复用旧页面** | 保留客户列表截图，为“分配客户”按钮设置热点 |
+| **补上新操作** | 用 HTML 生成分配表单，让管理员选择负责成员 |
+| **串起操作结果** | 确认后展示所选成员，再返回客户列表 |
+| **讲清关键分支** | 普通成员从同一入口进入，展示对应权限提示 |
+
+不必先准备完整 PRD，也不必一次重画全部页面。先让这次变化表达清楚，再沿着同一份源项目继续迭代。
+
+## 一份设计，两种离线交付
+
+| 流程评审工作台 | 完整原型 |
+| --- | --- |
+| 看页面关系、条件分支和说明 | 从指定入口连续操作 |
+| 适合推演、讲解和方案评审 | 适合演示、试用和收集反馈 |
+| 保留流程画布与页面批注 | 专注产品页面与真实操作 |
+
+两种视图都能导出为**单个 HTML 文件**，内含页面、图片、脚本和样式。接收者在浏览器打开即可使用，无需安装元形或启动服务。
+
+## 多个项目，放进同一个工作台
+
+对 AI 说：“再建一个用户门户项目，加到当前工作台。”它会创建并登记项目；顶栏切换项目，各自保存页面、画布、批注和导出。
+
+同一产品的多个模块可以组成完整原型，由 AI 串联已设计的按钮与导航。产品设计继续保存在项目目录中，通过共享运行时和项目扩展维护各自的交互。
 
 <a id="start"></a>
 
 ## 开始使用
 
-### 方式一：让你的 AI 助手安装 Skill
-
-把下面这段话发给能够读写本地文件、运行命令的 AI 助手：
+把这段话发给能够读写本地文件、运行命令的 AI 助手：
 
 ```text
 请安装 https://github.com/JasperLin2333/yuanxing 中的元形 Skill。
 先阅读 SKILL.md，按当前宿主的 Skill 目录规范安装，保留随包运行时与资源。
-安装后，基于我提供的已有产品界面，设计这次功能改动，生成流程画布和可独立体验的原型。
+安装后，基于我提供的已有产品界面，只设计这次功能改动，生成流程画布和可独立体验的原型。
 ```
 
-安装需要 **Node.js 20+**。元形使用你现有的 AI 助手，本身不额外配置模型 API Key，也不需要安装 npm 运行依赖。
-
-安装后可以这样说：
-
-> 使用元形。基于这张已有客户列表，只设计“分配客户”这次改动，保留其他区域。把管理员和普通成员的流程放到画布上，并导出能独立体验的原型。
-
-### 方式二：用 skills CLI 安装
-
-在你准备设计原型的项目目录运行，按提示选择当前使用的 AI 助手：
+也可以在项目目录中运行，按提示选择 AI 助手：
 
 ```sh
 npx skills add JasperLin2333/yuanxing --skill yuanxing
 ```
 
-这条命令由 [Vercel 的开源 skills CLI](https://github.com/vercel-labs/skills) 提供。安装后，告诉你的 AI 助手“使用元形”，再提供已有界面和本次需求。它会保留 Skill 随包的运行时、示例与资源。
+安装后，从一个具体需求开始：
 
-### 方式三：先在本地跑一个案例
+> 使用元形。基于这张已有客户列表，只设计“分配客户”这次改动，保留其他区域。把管理员和普通成员的流程放到画布上，并导出能独立体验的原型。
+
+**需要 Node.js 20+。使用你现有的 AI 助手，无需额外配置模型 API Key，也无需安装 npm 运行依赖。**
+
+## 为持续迭代准备的工程能力
+
+| 已有能力 | 可以直接查看的依据 |
+| --- | --- |
+| **156 项自动化测试** | 覆盖连线与分叉、撤销、交互状态、多项目隔离、版本冲突和离线导出：[测试代码](test/) |
+| **同源的两种单文件交付** | 画布与完整原型共用项目数据，导出内嵌所需资源：[导出与独立使用测试](test/portable.test.mjs) |
+| **3 个 Skill 构建通道** | 标准、SkillHub、WorkBuddy 包脱离源码后创建项目、检查和导出：[分发测试](test/distribution.test.mjs) |
+| **共享内核与项目扩展** | 通用运行时统一维护，专用交互随项目保存：[项目格式与扩展](references/project-format.md#项目扩展) |
+
+工作方式与操作细节见[工作台手册](references/workbench.md)，各宿主的能力适配与市场打包见[Agent 接入与分发](references/agent-adaptation.md)。
+
+<details>
+<summary><strong>先在本地跑一个案例</strong></summary>
 
 ```sh
 git clone https://github.com/JasperLin2333/yuanxing.git
@@ -78,13 +117,33 @@ node scripts/yuanxing.mjs init ./my-iteration --template iteration
 node scripts/yuanxing.mjs serve --root ./my-iteration --open
 ```
 
-直接告诉 AI 需要哪些页面和交互，它会组织模块、绑定操作并串联已有流程。打开工作台后也可以拖动页面、整理连线和打点批注。顶栏居中点击「完整原型」即可跨模块连续体验；点击「流程画布」或按 Esc 返回，保留原来的画布位置与缩放。你的 AI 助手可直接读取 [SKILL.md](SKILL.md)，继续修改 `my-iteration` 中的页面与流程。
+打开后直接整理画布，或让 AI 阅读 [SKILL.md](SKILL.md)，继续修改项目。新建空白项目可使用：
 
-手动安装到现有 AI 宿主的命令见下文。操作细节见[工作台手册](references/workbench.md)。
+```sh
+node scripts/yuanxing.mjs init ./my-prototype --name "我的产品"
+```
 
-## 多个项目，共用一个工作台
+</details>
 
-对 AI 说“再建一个用户门户项目，加到当前工作台”，它会创建独立项目并登记到工作区。顶栏左侧切换项目，页面、画布、批注和导出各自保存；中间始终是「流程画布／完整原型」切换。
+<details>
+<summary><strong>手动安装、导出与开发</strong></summary>
+
+把完整 Skill 安装到宿主的技能目录；目标目录存在时会保留原安装并停止：
+
+```sh
+node scripts/install.mjs --target "/你的宿主/skills/yuanxing"
+```
+
+导出当前项目：
+
+```sh
+node scripts/yuanxing.mjs export --root ./my-iteration --view review
+node scripts/yuanxing.mjs export --root ./my-iteration --view prototype
+```
+
+文件保存到项目的 `dist/`，顶栏“导出 HTML”菜单也提供这两种方式。
+
+多项目工作区：
 
 ```sh
 node scripts/yuanxing.mjs workspace add --workspace ./my-workspace.json --root ./my-iteration --id crm
@@ -92,79 +151,34 @@ node scripts/yuanxing.mjs workspace add --workspace ./my-workspace.json --root .
 node scripts/yuanxing.mjs serve --workspace ./my-workspace.json --open
 ```
 
-同一产品的全部模块组成完整原型，由 AI 串联已设计的按钮和导航。只有不同产品或平台才分开入口，无需手动设置模块体验入口。没有设计的功能不会自动补造。
-
-## 一份设计，两种交付
-
-| 流程评审工作台 | 独立体验原型 |
-| --- | --- |
-| 看页面关系、分支与说明 | 从指定入口连续操作 |
-| 适合产品思考、方案讨论和评审 | 适合演示、试用和收集反馈 |
-| 保留画布与页面批注 | 收起工作台面板，专注产品流程 |
-
-```sh
-node scripts/yuanxing.mjs export --root ./my-iteration --view review
-node scripts/yuanxing.mjs export --root ./my-iteration --view prototype
-```
-
-两个文件都会保存到项目的 `dist/`，页面、图片、脚本和样式已内嵌。接收者打开 HTML 就能查看，无需安装元形或启动服务。顶部“导出 HTML”菜单也提供这两种导出方式。
-
-## 几个你可能关心的问题
-
-**一定要先有完整 PRD 吗？**
-
-不用。可以从一段需求、几张旧页面或已有 HTML 开始，先把当前需要讨论的流程做出来。
-
-**截图能和新生成的页面接在一起吗？**
-
-可以。截图设置热点，HTML 绑定控件跳转；不变的部分可以一直保留为截图。
-
-**打点会让 AI 自动修改页面吗？**
-
-不会。打点是普通批注，用来说明和讨论页面。
-
-**能直接导入任何前端工程吗？**
-
-当前支持自包含 HTML、本地 CSS／图片／普通 JavaScript，以及 PNG、JPEG、WebP 截图。React／Vue 工程、外部 CDN、真实登录与网络接口需要先做适配。项目格式与交互说明见[这里](references/project-format.md)。
-
-**我的原型保存在哪里？**
-
-项目文件保存在你选择的本地目录。工作台只监听本机地址；AI 助手如何处理输入材料，取决于你所用的宿主与模型服务。
-
-## 手动安装与开发
-
-将完整 Skill 安装到当前宿主的技能目录，目标文件夹命名为 `yuanxing`：
-
-```sh
-node scripts/install.mjs --target "/你的宿主/skills/yuanxing"
-```
-
-安装器保留既有安装，目标目录存在时会停止。新建空白项目可运行：
-
-```sh
-node scripts/yuanxing.mjs init ./my-prototype --name "我的产品"
-```
-
-代码检查与示例重新导出：
+验证与构建：
 
 ```sh
 npm test
 npm run check
 npm run build:demo
-```
-
-通用工作台统一维护在 `runtime/`。项目页面、数据与专用交互可以独立保存，通过显式的项目扩展接入同一个内核，启动和离线导出使用相同实现。扩展接口见[项目格式说明](references/project-format.md#项目扩展)。
-
-欢迎在 [Issues](https://github.com/JasperLin2333/yuanxing/issues) 分享你要设计的具体场景、使用问题或改进建议。主代码采用 [MIT](LICENSE) 许可证，附带连线组件的来源和许可证见[第三方说明](THIRD_PARTY_NOTICES.md)。
-
-## Skill 接入与市场包
-
-一份通用 Skill 与运行时持续维护，宿主适配按实际的文件、命令、浏览器和产物能力选择执行方式；市场专用元数据在打包时注入。详细规则见 [Agent 接入与分发](references/agent-adaptation.md)。
-
-```sh
 npm run pack:generic
 npm run pack
 npm run pack:workbuddy
 ```
 
-分别生成标准包、SkillHub 包和 WorkBuddy 包，保存在 `dist/<通道>/yuanxing.zip`。发布包不含官网、演示导出、测试或个人项目，每个通道均校验脱离源码后的创建、检查和离线导出。豆包工作等其他市场先使用通用格式准备，待其规范与宿主实际执行确认后再增加发布通道。
+市场包分别保存在 `dist/<通道>/yuanxing.zip`。构建格式、宿主接入与市场提交要求见[分发说明](references/agent-adaptation.md#分发与版本)。
+
+</details>
+
+<details>
+<summary><strong>输入材料、文件保存与批注</strong></summary>
+
+当前支持自包含 HTML、本地 CSS、图片、普通 JavaScript，以及 PNG、JPEG、WebP 截图。框架工程、外部 CDN、真实登录和网络接口需要先适配，具体见[项目格式](references/project-format.md)。
+
+项目文件保存在你选择的本地目录。工作台只监听本机地址；模型如何处理输入材料，取决于你使用的 AI 宿主与模型服务。
+
+批注用来说明与评审，保留在同一份项目中，不会自动转成 AI 的修改指令。
+
+</details>
+
+---
+
+**先拿一个你熟悉的功能试试。** [体验完整原型](https://jasperlin2333.github.io/yuanxing/demo/prototype.html)，或在 [Issues](https://github.com/JasperLin2333/yuanxing/issues) 分享你的具体场景和改进建议。
+
+主代码采用 [MIT](LICENSE) 许可证；附带组件的来源与许可见[第三方说明](THIRD_PARTY_NOTICES.md)。
