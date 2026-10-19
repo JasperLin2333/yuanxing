@@ -76,6 +76,14 @@ export function pageBridge(config) {
     }
     send('measure', {positions});
   }
+  window.addEventListener('message',event=>{
+    if(event.source!==parent||event.data?.yuanxing!==config.token||event.data?.type!=='handoff-snapshot')return;
+    const copy=document.documentElement.cloneNode(true),originals=[document.documentElement,...document.documentElement.querySelectorAll('*')],nodes=[copy,...copy.querySelectorAll('*')];
+    nodes.forEach((n,i)=>{if(n.matches('script,iframe,object,embed')){n.remove();return;}for(const a of [...n.attributes])if(/^on/i.test(a.name))n.removeAttribute(a.name);
+      if(n.tagName==='INPUT'&&n.type!=='file'){n.setAttribute('value',originals[i].value);if(originals[i].checked)n.setAttribute('checked','');else n.removeAttribute('checked');}
+      if(n.tagName==='TEXTAREA')n.textContent=originals[i].value;if(n.tagName==='OPTION'){if(originals[i].selected)n.setAttribute('selected','');else n.removeAttribute('selected');}
+    });send('handoff-snapshot',{html:copy.outerHTML});
+  });
   function sync() { collect(); paint(); send('context', {context}); measure(); }
   function localAction(element) {
     const action = element.dataset.yxAction, targets = queryAll(element.dataset.yxTarget || '');

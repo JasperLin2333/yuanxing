@@ -2,7 +2,8 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,randomBytes,createHash} from 'node:crypto';
+import {spawn,execFile} from 'node:child_process';
 import {createStore,standalone,serve} from '../runtime/server.mjs';
 import {validate,exportIssues} from '../runtime/core.mjs';
 import {readWorkspace,registerProject,serveWorkspace} from '../runtime/workspace.mjs';
@@ -19,6 +20,7 @@ node scripts/yuanxing.mjs connect --root <目录> --from <页面> --to <页面> 
 node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项目目录> --id <项目标识> [--name 名称]
 node scripts/yuanxing.mjs workspace list --workspace <工作区.json>
 node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] [--open]
+node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
 node scripts/yuanxing.mjs check --root <目录>
 node scripts/yuanxing.mjs serve --root <目录> [--port 4318] [--open]
 node scripts/yuanxing.mjs export --root <目录> --view review|prototype [--module 标识] [--flow 标识] [--out 文件.html] [--replace]
@@ -45,6 +47,14 @@ export async function run(args,{sessionToken}={}){
   const [command,...rest]=args;
   if(!command||['help','--help','-h'].includes(command)){console.log(help);return;}
   const flags=options(rest);
+  if(command==='serve'&&!process.env.YUANXING_WATCH_CHILD){
+    const port=Number(flags.port||4318);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('端口应为 1～65535');
+    const child=spawn(process.execPath,['--watch','--watch-preserve-output',fileURLToPath(import.meta.url),...args.filter(arg=>arg!=='--open')],{env:{...process.env,YUANXING_WATCH_CHILD:'1',YUANXING_SESSION_TOKEN:sessionToken||randomBytes(24).toString('hex')},stdio:['inherit','pipe','inherit']});
+    let opened=false,output='';child.stdout.on('data',data=>{process.stdout.write(data);output=(output+data).slice(-4096);const url=output.match(/元形(?:工作区|工作台)：(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+      if(flags.open&&!opened&&url){opened=true;const command=process.platform==='darwin'?'open':process.platform==='win32'?'cmd':'xdg-open';execFile(command,process.platform==='win32'?['/c','start','',url]:[url],error=>{if(error)console.log('请在浏览器打开 '+url);});}});
+    const stop=()=>child.kill('SIGTERM');process.once('SIGINT',stop);process.once('SIGTERM',stop);
+    child.once('exit',code=>{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);process.exitCode=code||0;});child.once('error',error=>{console.error(error.message);process.exitCode=1;});return child;
+  }
   if(command==='init'){
     const root=path.resolve(flags._[0]||required(flags,'root')),template=flags.template||'blank';
     if(await exists(root))throw new Error('目标目录已存在，请选择新目录');
@@ -98,7 +108,12 @@ export async function run(args,{sessionToken}={}){
     await fs.mkdir(path.dirname(out),{recursive:true});await fs.writeFile(out,html,{flag:flags.replace?'w':'wx'});
     console.log(`已生成 ${out}`);return;
   }
-  const {model,revision}=await store.readModel();
+  if(command==='apply'){
+    const baseRaw=await fs.readFile(path.resolve(required(flags,'base')),'utf8'),base=JSON.parse(baseRaw),next=JSON.parse(await fs.readFile(path.resolve(required(flags,'model')),'utf8'));
+    try{const saved=await store.save(next,createHash('sha256').update(baseRaw).digest('hex'),base);console.log('已合并保存 '+saved.revision);}
+    catch(error){if(error.details)console.error(JSON.stringify({base,local:next,...error.details},null,2));throw error;}return;
+  }
+  const {model,revision}=await store.readModel(),base=JSON.parse(JSON.stringify(model));
   if(command==='add'){
     const source=await fs.realpath(path.resolve(required(flags,'source'))),extension=path.extname(source).toLowerCase();
     const kind=['.html','.htm'].includes(extension)?'html':['.png','.jpg','.jpeg','.webp'].includes(extension)?'image':null;
@@ -115,15 +130,15 @@ export async function run(args,{sessionToken}={}){
     const module=model.modules.find(m=>m.id===moduleId);module.entry??=id;
     const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));
     await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,content,{flag:'wx'});
-    try{await store.save(model,revision);}catch(error){await fs.unlink(target);throw error;}
+    try{await store.save(model,revision,base);}catch(error){await fs.unlink(target);throw error;}
     console.log(`已添加 ${id}`);return;
   }
   if(command==='connect'){
     const from=required(flags,'from'),to=required(flags,'to');if(!flags.selector&&!flags.rect&&!flags.diagram)throw new Error('可操作跳转需指定 --selector 或 --rect；画布关系使用 --diagram');
     const edge={id:identifier(flags.id||'edge-'+randomUUID()),from,to,label:flags.label||'继续',...(flags.diagram?{diagram:true}:{}),...(flags.selector?{selector:flags.selector}:{}),...(flags.rect?{rect:flags.rect.split(',').map(Number)}:{}),...(flags.when?{when:JSON.parse(flags.when)}:{}),...(flags.set?{setContext:JSON.parse(flags.set)}:{})};
     if(flags.rect){const source=model.nodes.find(n=>n.id===from);if(source?.kind==='image')edge.imagePath=source.path;}
-    model.edges.push(edge);const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));await store.save(model,revision);console.log(`已连接 ${from} → ${to}`);return;
+    model.edges.push(edge);const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));await store.save(model,revision,base);console.log(`已连接 ${from} → ${to}`);return;
   }
   throw new Error(`未知命令：${command}`);
 }
-if(process.argv[1]&&await fs.realpath(process.argv[1]).catch(()=>'')===fileURLToPath(import.meta.url))run(process.argv.slice(2)).catch(error=>{console.error(error.message);process.exitCode=1;});
+if(process.argv[1]&&await fs.realpath(process.argv[1]).catch(()=>'')===fileURLToPath(import.meta.url))run(process.argv.slice(2),{sessionToken:process.env.YUANXING_SESSION_TOKEN}).catch(error=>{console.error(error.message);process.exitCode=1;});

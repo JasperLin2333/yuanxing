@@ -1,4 +1,5 @@
 // 页面目录与模块管理界面，业务修改由工作台传入的回调完成。
+import {recycleNodes} from './core.mjs';
 const librarySvgNS='http://www.w3.org/2000/svg';
 const libraryIconPaths={
   plus:['M12 5v14M5 12h14'],
@@ -87,7 +88,7 @@ export function createLibrary({getModel,getModule,getCurrent,getSelected,getRecy
       modules.append(group);
     }
     if(!readonly&&moveModule){const end=libraryElement('div','library-end-drop','移到最后');end.ondragover=event=>{if(dragging){event.preventDefault();event.dataTransfer.dropEffect='move';}};end.ondrop=event=>{event.preventDefault();if(dragging){const id=dragging;dragging=null;moveModule(id,null);}nav.classList.remove('library-dragging');};modules.append(end);}
-    if(openRecycle){const footer=libraryElement('div','library-sidebar-footer'),button=libraryButton(undefined,openRecycle,`library-recycle ${getRecycleOpen?.()?'active':''}`),count=model().nodes.filter(n=>n.overview===false&&libraryIsPage(n)&&model().modules.some(m=>m.id===n.module)).length;button.title='回收站：查看未显示在画布上的内容';button.append(libraryIcon('delete'),libraryElement('span','','回收站'),libraryElement('span','library-recycle-count',String(count)));footer.append(button);nav.append(footer);}
+    if(openRecycle){const footer=libraryElement('div','library-sidebar-footer'),button=libraryButton(undefined,openRecycle,`library-recycle ${getRecycleOpen?.()?'active':''}`),count=recycleNodes(model()).length;button.title='回收站：查看未显示在画布上的内容';button.append(libraryIcon('delete'),libraryElement('span','','回收站'),libraryElement('span','library-recycle-count',String(count)));footer.append(button);nav.append(footer);}
     if(retainFocus){search.focus({preventScroll:true});if(search.type==='search')search.setSelectionRange(...selection);}
   }
   function focusSearch(){const search=sidebar?.querySelector('.library-search');search?.focus();search?.select();}

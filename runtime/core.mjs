@@ -722,3 +722,33 @@ export function importManifest(manifest) {
   }
   return model;
 }
+
+// 按共同基线合并；有标识的列表逐项、逐字段处理，坐标数组与正文保持整体。
+export function mergeProject(base,local,remote,{prefer='local'}={}){
+  const conflicts=[],equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b),copy=value=>value===undefined?undefined:clone(value);
+  const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+  function merge(b,l,r,path){
+    if(equal(l,r))return copy(l);if(equal(l,b))return copy(r);if(equal(r,b))return copy(l);
+    if(object(b)&&object(l)&&object(r)){
+      const result={};for(const key of new Set([...Object.keys(b),...Object.keys(r),...Object.keys(l)])){
+        const value=merge(b[key],l[key],r[key],path.concat(key));if(value!==undefined)Object.defineProperty(result,key,{value,writable:true,enumerable:true,configurable:true});
+      }return result;
+    }
+    const keyed=values=>Array.isArray(values)&&values.every(v=>object(v)&&typeof v.id==='string')&&new Set(values.map(v=>v.id)).size===values.length;
+    if(keyed(b)&&keyed(l)&&keyed(r)){
+      const bm=new Map(b.map(v=>[v.id,v])),lm=new Map(l.map(v=>[v.id,v])),rm=new Map(r.map(v=>[v.id,v]));
+      const order=values=>values.map(v=>v.id).filter(id=>bm.has(id)),bo=order(b),lo=order(l),ro=order(r);
+      // 只比较两侧都保留的基线项，删除本身不算重排。
+      const common=bo.filter(id=>lm.has(id)&&rm.has(id)),relative=ids=>ids.filter(id=>common.includes(id));
+      const localReordered=!equal(relative(lo),relative(bo)),remoteReordered=!equal(relative(ro),relative(bo));
+      if(localReordered&&remoteReordered&&!equal(relative(lo),relative(ro)))conflicts.push(path.concat('@order').join('/'));
+      const primary=localReordered&&(!remoteReordered||prefer==='local')?l:r,secondary=primary===l?r:l;
+      const ids=primary.map(v=>v.id),otherIds=secondary.map(v=>v.id);
+      for(let i=0;i<otherIds.length;i++)if(!ids.includes(otherIds[i])){const next=otherIds.slice(i+1).find(id=>ids.includes(id));ids.splice(next===undefined?ids.length:ids.indexOf(next),0,otherIds[i]);}
+      const result=[];
+      for(const id of ids){const value=merge(bm.get(id),lm.get(id),rm.get(id),path.concat(id));if(value!==undefined)result.push(value);}return result;
+    }
+    conflicts.push(path.join('/'));return copy(prefer==='remote'?r:l);
+  }
+  return {model:merge(base,local,remote,[]),conflicts};
+}

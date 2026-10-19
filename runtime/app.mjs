@@ -1,10 +1,12 @@
-import {clone,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
+import {handoffAncestors,handoffClean,collectHandoff,handoffDocument,handoffPrompt,createDOMPicker} from './handoff.mjs';
+import {clone,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
 import {connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
 import {createLibrary,libraryStyles,reconcileCanvasCards} from './library.mjs';
 import {prototypeDocument,thumbnailHTML,flowEntries,cleanContext,createPreviewQueue,bindNativeDocument} from './player.mjs';
 import {createProjectExtension} from './extension.mjs';
 const $=s=>document.querySelector(s), boot=globalThis.YUANXING_BOOT||{};
 const apiBase=boot.basePath||'';
+let baseModel,conflictData=null,pendingRuntimeVersion=null,loadedRuntimeVersion=boot.runtimeVersion;
 let bundle,model,revision,token=boot.token,readonly=!!boot.readonly,dirty=false,saving=false,conflict=false,timer,saveFlight=null;
 let moduleId,selected=null,current=null,mode=null,linkCaptureTarget=null,replaceImage=null,pendingImageReplacement=null;
 let insertPoint=null,cancelConnection=null,exporting=false,exportCloseTimer,noticeTimer=null;
@@ -27,6 +29,7 @@ function observePreviews(nodes){
   previewObserver=new IntersectionObserver(entries=>{for(const entry of entries){const card=entry.target,n=byId.get(card.dataset.id);if(!n)continue;if(entry.isIntersecting)previewQueue.add(card,()=>updatePreview(card,n));else{previewQueue.remove(card);card.querySelector('.node-thumb')?.remove();canvasPreviews.delete(card);}}},{root:$('#canvas-viewport'),rootMargin:'240px'});
   for(const card of $('#nodes').children)previewObserver.observe(card);
 }
+let devMode=false,devPicker=null,devElement=null,devSnapshot=null,devOriginal=null;
 let annotationEditor=null,annotationEditorId=null,annotationEditorNew=false;
 let linesHidden=false,viewReady=false,viewTimer;
 let zoomSensitivity=3.5;try{const saved=Number(localStorage.getItem('yuanxing-zoom-sensitivity'));if(saved>=.5&&saved<=6)zoomSensitivity=Math.round(saved*10)/10;}catch{}
@@ -104,17 +107,35 @@ function updateHistoryButtons(){document.querySelector('[data-action="undo"]').d
 function edit(fn,render=true,group=null){if(readonly)return;history.push(model,{group});fn(model);dirty=true;updateHistoryButtons();scheduleSave();if(render)renderAll();}
 function editField(fn){if(readonly)return;if(inputGroup!==document.activeElement){history.push(model);inputGroup=document.activeElement;}fn(model);dirty=true;updateHistoryButtons();scheduleSave();}
 function scheduleSave(){clearTimeout(timer);timer=setTimeout(save,600);}
+function showCollaborationConflict(data,snapshot,baseline){
+  conflict=true;conflictData={base:clone(baseline),local:clone(snapshot),remote:clone(data.model),revision:data.revision,conflicts:data.conflicts};
+  const backup=()=>download(JSON.stringify({...conflictData,local:model},null,2),'工作台双方修改.json','application/json');
+  notice('同一内容被同时修改：'+data.conflicts.slice(0,3).join('、')+'。请选择冲突内容，其他独立修改会一起保留。',[
+    ['保留我的冲突项',()=>resolveCollaborationConflict('local')],['采用外部冲突项',()=>resolveCollaborationConflict('remote')],['导出双方修改',backup]
+  ],'save');
+}
+function resolveCollaborationConflict(prefer){
+  if(!conflictData)return;const data=conflictData,chosen=mergeProject(data.base,model,data.remote,{prefer});
+  const errors=validate(chosen.model);if(errors.length){notice('合并后存在关联冲突：'+errors.join('；'),[['导出双方修改',()=>download(JSON.stringify({...data,local:model},null,2),'工作台双方修改.json','application/json')]],'save');return;}
+  history.push(model);model=chosen.model;baseModel=clone(data.remote);revision=data.revision;conflict=false;conflictData=null;dirty=true;renderAll();scheduleSave();
+}
 async function save(){
   if(saveFlight)return saveFlight;
   if(originalReadonly||!dirty||conflict)return;
   const errors=validate(model);if(errors.length){updateHistoryButtons();notice(errors.join('；'),[],'save');return;}
-  saving=true;const snapshot=clone(model);saveFlight=(async()=>{
-  try{const r=await fetch(apiBase+'/api/project',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({revision,model:snapshot})});const data=await r.json();if(r.status===409){conflict=true;throw new Error('项目已被外部修改，当前编辑内容仍保留。');}if(!r.ok)throw new Error(data.error||'保存失败');revision=data.revision;dirty=JSON.stringify(model)!==JSON.stringify(snapshot);updateHistoryButtons();if($('#message').dataset.kind==='save')$('#message').hidden=true;if(dirty)scheduleSave();}
+  saving=true;const snapshot=clone(model),baseline=clone(baseModel);saveFlight=(async()=>{
+  try{const r=await fetch(apiBase+'/api/project',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({revision,model:snapshot,baseModel:baseline})});const data=await r.json();
+    if(r.status===409&&data.model&&data.conflicts){showCollaborationConflict(data,snapshot,baseline);return;}
+    if(r.status===409){conflict=true;throw new Error('项目已被外部修改，当前编辑内容仍保留。');}if(!r.ok)throw new Error(data.error||'保存失败');
+    const saved=data.model||snapshot,combined=mergeProject(snapshot,model,saved);revision=data.revision;baseModel=clone(saved);
+    if(combined.conflicts.length){showCollaborationConflict({model:saved,revision,conflicts:combined.conflicts},model,snapshot);return;}
+    const changed=JSON.stringify(model)!==JSON.stringify(combined.model);model=combined.model;dirty=JSON.stringify(model)!==JSON.stringify(saved);updateHistoryButtons();if(changed){history.clear();renderAll();}if($('#message').dataset.kind==='save')$('#message').hidden=true;if(dirty)scheduleSave();
+  }
   catch(error){updateHistoryButtons();const backup=['导出我的修改',()=>download(JSON.stringify(model,null,2),'工作台未保存修改.json','application/json')];notice(error.message,conflict?[backup,['重新载入',()=>{if(confirm('重新载入会替换当前编辑内容。请先导出需要保留的修改。'))reload();}]]:[['重试',save],backup],'save');}
   finally{saving=false;saveFlight=null;}
   })();return saveFlight;
 }
-async function reload(render=true){const r=await fetch(apiBase+'/api/project');if(!r.ok)throw new Error(await r.text());bundle=await r.json();model=bundle.model;flowContext=clone(model.contextDefaults||{});revision=bundle.revision;dirty=conflict=false;history.clear();updateHistoryButtons();$('#message').hidden=true;moduleId=model.modules.some(m=>m.id===moduleId)?moduleId:model.entryModule||model.modules[0]?.id;if(render)renderAll();}
+async function reload(render=true){const r=await fetch(apiBase+'/api/project');if(!r.ok)throw new Error(await r.text());bundle=await r.json();model=bundle.model;baseModel=clone(model);flowContext=clone(model.contextDefaults||{});revision=bundle.revision;dirty=conflict=false;conflictData=null;history.clear();updateHistoryButtons();$('#message').hidden=true;moduleId=model.modules.some(m=>m.id===moduleId)?moduleId:model.entryModule||model.modules[0]?.id;if(render)renderAll();}
 function sidebar(){
   $('#project-title').textContent=model.title;$('#module-title').textContent=recycleOpen?'回收站':model.modules.find(m=>m.id===moduleId)?.title||'';
   library.renderSidebar($('#sidebar'));
@@ -206,14 +227,15 @@ function frameFor(n,container,scale,onload){
   const frame=document.createElement('iframe');frame.title=n.title;frame.className='page-frame';frame.tabIndex=thumbnail?-1:0;
   frame.style.width=n.width+'px';frame.style.height=n.height+'px';frame.style.transform=`scale(${scale})`;if(layout){frame.style.left=layout.left+'px';frame.style.top=layout.top+'px';}
   const html=expandHTML(bundle.resources[n.id]||'<p>页面资源不存在</p>',bundle.fragments||{});
-  if(thumbnail||projectExtension?.declarative){frame.setAttribute('sandbox','allow-same-origin');frame.tabIndex=thumbnail||!experience?-1:0;frame.srcdoc=thumbnailHTML(html);if(!thumbnail)frames[n.id]=frame;}
+  if(thumbnail||projectExtension?.declarative||devMode){frame.setAttribute('sandbox','allow-same-origin');frame.tabIndex=thumbnail||!experience?-1:0;frame.srcdoc=thumbnailHTML(devMode&&devSnapshot?.id===n.id?devSnapshot.html:html);if(!thumbnail)frames[n.id]=frame;}
   else{
     frame.setAttribute('sandbox','allow-scripts');frame.dataset.bridge=uid('frame');frames[n.id]=frame;
     frame.srcdoc=prototypeDocument(html,{token:frame.dataset.bridge,width:n.width,height:n.height,context:flowContext,edges:outgoing(n.id).map(({id,selector})=>({id,selector})),annotations:model.annotations.filter(a=>a.node===n.id&&a.selector).map(({id,selector,offset})=>({id,selector,offset}))});
   }
-  frame.onload=()=>{if(!frame.isConnected)return;if(projectExtension?.declarative)projectExtension.layout?.(frame.contentDocument,n);if(thumbnail||projectExtension?.declarative)measure(frame,n);onload?.(frame);};container.append(frame);
+  frame.onload=()=>{if(!frame.isConnected)return;frame.dataset.yxReady='true';if(projectExtension?.declarative&&!devMode)projectExtension.layout?.(frame.contentDocument,n);if(thumbnail||projectExtension?.declarative)measure(frame,n);onload?.(frame);};container.append(frame);
 }
 function canvas(){
+  devPicker?.destroy();devPicker=null;devElement=null;devOriginal=null;renderHandoffTools();
   stopPreviews();const ns=activeCanvasNodes(),host=$('#nodes');missing.clear();frames={};$('#page-stage').replaceChildren();
   reconcileCanvasCards(host,ns,(n,existing)=>{
     const card=existing||document.createElement('article');card.className=`node ${isBranch(n)?'branch':''} ${n.reference?'reference':''} ${selectedNodeIds().includes(n.id)?'selected':''}`;card.classList.toggle('node-mobile',canvasNodeType(n)==='mobile');card.classList.toggle('node-recycled',recycleOpen);card.dataset.id=n.id;card.style.width=canvasNodeWidth(n)+'px';card.style.height=canvasNodeHeight(n)+'px';card.style.left=n.x+'px';card.style.top=n.y+'px';
@@ -450,13 +472,17 @@ function resizePage(){
   const stage=$('#page-stage');pageScale=Math.min(1,Math.max(.2,($('#page-viewport').clientWidth-48)/n.width));stage.style.width=n.width*pageScale+'px';stage.style.height=n.height*pageScale+'px';const frame=stage.querySelector('iframe');if(frame)frame.style.transform=`scale(${pageScale})`;renderOverlays();transform();
 }
 function viewer(){
+  devPicker?.destroy();devPicker=null;devElement=null;devOriginal=null;renderHandoffTools();
   stopPreviews();$('#nodes').replaceChildren();const n=node(current);$('#viewer-title').textContent=n.title;const stage=$('#page-stage');stage.replaceChildren();frames={};positions={};
   stage.tabIndex=n.kind==='note'?0:-1;stage.classList.toggle('note-stage',n.kind==='note');stage.classList.toggle('mobile-page',canvasNodeType(n)==='mobile');stage.classList.toggle('native-prototype',!!(experience&&projectExtension?.nativeInteraction&&n.kind==='html'));noteFit=true;
   const avail=$('#page-viewport').clientWidth-48;pageScale=Math.min(1,Math.max(.2,avail/n.width));stage.style.width=n.width*pageScale+'px';stage.style.height=n.height*pageScale+'px';
-  frameFor(n,stage,pageScale,frame=>{if(frame&&projectExtension?.declarative){projectExtension.mount?.(frame.contentDocument,n);if(experience&&projectExtension.nativeInteraction)bindNativeDocument(frame.contentDocument,{getEdges:()=>outgoing(n.id),follow,onInput:(event,type)=>projectExtension.nativeInput?.(event,type),onKeyDown:event=>projectExtension.nativeKeyDown?.(event)});measure(frame,n);}renderOverlays();if(!$('#inspector').contains(document.activeElement))renderInspector();});
+  frameFor(n,stage,pageScale,frame=>{if(frame&&projectExtension?.declarative&&!devMode){projectExtension.mount?.(frame.contentDocument,n);if(experience&&projectExtension.nativeInteraction)bindNativeDocument(frame.contentDocument,{getEdges:()=>outgoing(n.id),follow,onInput:(event,type)=>projectExtension.nativeInput?.(event,type),onKeyDown:event=>projectExtension.nativeKeyDown?.(event)});measure(frame,n);}if(frame&&devMode&&frames[current]===frame){devPicker=createDOMPicker(frame.contentDocument,{onSelect:element=>{devElement=element;renderHandoffTools();},onExit:()=>toggleDeveloperMode(false)});renderHandoffTools();}renderOverlays();if(!$('#inspector').contains(document.activeElement))renderInspector();});
   stage.onwheel=null;stage.onpointerdown=null;projectExtension?.bindStage?.({stage});
 }
 window.addEventListener('message',event=>{
+  if(devMode&&devOriginal?.id===current&&event.source===devOriginal.frame.contentWindow&&event.data?.yuanxing===devOriginal.frame.dataset.bridge&&event.data?.type==='handoff-snapshot'&&typeof event.data.html==='string'){
+    devSnapshot={id:current,html:event.data.html};mountHandoffPreview();return;
+  }
   const frame=frames[current],message=event.data;
   if(!frame||event.source!==frame.contentWindow||message?.yuanxing!==frame.dataset.bridge)return;
   if(message.type==='measure'){
@@ -469,7 +495,7 @@ window.addEventListener('message',event=>{
 });
 function renderOverlays(){
   updateAnnotationButton();if(!current)return;
-  const n=node(current),stage=$('#page-stage');if(experience&&projectExtension?.nativeInteraction&&n.kind==='html'){stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());return;}if(projectExtension?.renderOverlays)projectExtension.renderOverlays({n,stage,frame:frames[current],current,mode,pageScale},()=>renderPageHotspots(n,stage));
+  const n=node(current),stage=$('#page-stage');if(devMode){stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());return;}if(experience&&projectExtension?.nativeInteraction&&n.kind==='html'){stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());return;}if(projectExtension?.renderOverlays)projectExtension.renderOverlays({n,stage,frame:frames[current],current,mode,pageScale},()=>renderPageHotspots(n,stage));
   else{stage.querySelectorAll('.hotspot,.pin,.capture').forEach(el=>el.remove());renderPageHotspots(n,stage);}
   if(experience)return;
   const ann=model.annotations.filter(a=>a.node===current);ann.forEach((a,i)=>{const point=positions[current]?.[a.id]||(!a.selector?a.point:null);if(a.imagePath&&a.imagePath!==n.path){missing.add(a.id);return;}if(a.imagePath)missing.delete(a.id);if(!point)return;const b=document.createElement('button');b.className=`pin ${point[1]*stage.clientHeight<36?'below':''} ${selected?.id===a.id?'selected':''}`;b.dataset.pin=a.id;b.textContent=i+1;b.setAttribute('aria-label',`${readonly?'查看':'编辑'}标记 ${i+1}`);b.title=`${readonly?'查看':'编辑'}标记 ${i+1}`;b.style.left=point[0]*100+'%';b.style.top=point[1]*100+'%';b.onclick=()=>selectAnnotation(a.id);stage.append(b);});
@@ -648,8 +674,39 @@ function imageMenu(id,event,trigger){
 function exportMenu(open=true){if(readonly||exporting)return;closeMenus();$('#export-options').hidden=!open;$('#export-trigger').setAttribute('aria-expanded',String(open));}
 function canvasMenu(event){if(readonly||current||recycleOpen)return;closeMenus();insertPoint=event?canvasPoint(event):defaultInsertPoint();const menu=$('#canvas-add-menu'),r=$('#canvas-add-trigger').getBoundingClientRect();menu.hidden=false;menu.style.left=Math.max(8,Math.min(event?.clientX??r.left,innerWidth-menu.offsetWidth-8))+'px';menu.style.top=Math.max(8,Math.min(event?.clientY??r.top-menu.offsetHeight-8,innerHeight-menu.offsetHeight-8))+'px';$('#canvas-add-trigger').setAttribute('aria-expanded','true');}
 function addNote(){if(readonly)return;const point=insertPoint||defaultInsertPoint();insertPoint=null;edit(m=>{const id=uid('note');m.nodes.push({id,module:moduleId,title:'流程说明',kind:'note',width:640,height:320,x:point[0],y:point[1],description:''});selected={type:'node',id};});if(panels.inspector){const input=$('#inspector input');input?.focus();input?.select();}}
+function toggleDeveloperMode(force){
+  const next=force??!devMode,id=current,frame=frames[id],doc=frame?.contentDocument;
+  devSnapshot=next&&doc?{id,html:handoffClean(doc.documentElement).outerHTML}:null;
+  devMode=next;devPicker?.destroy();devPicker=null;devElement=null;mode=null;closeAnnotationEditor();$('#handoff-menu').open=false;
+  document.body.classList.toggle('handoff-mode',devMode);document.querySelector('[data-action="developer-mode"]').setAttribute('aria-pressed',String(devMode));
+  if(next&&frame?.dataset.yxReady==='true'&&node(id)?.kind==='html'){
+    devOriginal={id,frame};frame.hidden=true;renderOverlays();
+    mountHandoffPreview();if(!doc&&frame.dataset.bridge)frame.contentWindow.postMessage({yuanxing:frame.dataset.bridge,type:'handoff-snapshot'},'*');
+  }else if(!next&&devOriginal?.id===id&&devOriginal.frame.isConnected){
+    frames[id]?.remove();frames[id]=devOriginal.frame;frames[id].hidden=false;devOriginal=null;renderOverlays();
+  }else if(current)viewer();else renderAll();renderHandoffTools();
+}
+function mountHandoffPreview(){
+  devPicker?.destroy();devPicker=null;devElement=null;if(frames[current]&&frames[current]!==devOriginal?.frame)frames[current].remove();
+  frameFor(node(current),$('#page-stage'),pageScale,inspection=>{if(!devMode||frames[current]!==inspection)return;devPicker=createDOMPicker(inspection.contentDocument,{onSelect:element=>{devElement=element;renderHandoffTools();},onExit:()=>toggleDeveloperMode(false)});renderHandoffTools();});
+}
+function renderHandoffTools(){
+  const bar=$('#handoff-tools');bar.hidden=!devMode||!current;if(bar.hidden)return;
+  const crumbs=$('#handoff-breadcrumbs');crumbs.replaceChildren();
+  if(!devElement){const hint=document.createElement('span');hint.textContent=node(current)?.kind==='html'?'点击要交付的区域，可通过层级选择扩大范围。':'当前为图片或说明，请打开 HTML 页面提取。';crumbs.append(hint);}
+  else for(const element of handoffAncestors(devElement)){const button=document.createElement('button');button.textContent=element.tagName.toLowerCase()+(element.id?'#'+element.id:element.classList.length?'.'+element.classList[0]:'');button.disabled=element===devElement;button.onclick=()=>devPicker.select(element);crumbs.append(button);}
+  for(const action of ['handoff-copy','handoff-download','handoff-html'])document.querySelector('[data-action="'+action+'"]').disabled=!devElement;
+}
+function selectedHandoff(){
+  if(!devMode||!devElement)throw new Error('请先选择一个 UI 区域。');const n=node(current);
+  return {snippet:collectHandoff(devElement),context:{project:model.title,module:model.modules.find(m=>m.id===n.module)?.title||n.module,title:n.title,id:n.id,path:'artifact/'+n.path,description:explanationText(n),annotations:model.annotations.filter(a=>a.node===n.id),...projectExtension?.handoffContext?.(n)}};
+}
+async function copyHandoff(text){
+  if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return;}catch{}}
+  const field=document.createElement('textarea');field.value=text;field.style.cssText='position:fixed;opacity:0';document.body.append(field);field.select();try{if(!document.execCommand('copy'))throw new Error('复制失败，请下载片段 HTML。');}finally{field.remove();}
+}
 async function action(name){
-  switch(name){case 'experience':if(!experience)startExperience();break;case 'experience-exit':exitExperience();break;case 'export-prototype':await exportFile('all','prototype');break;case 'image':replaceImage=null;closeMenus();$('#image-input').multiple=true;$('#image-input').click();break;case 'replace-image':chooseImageReplacement($('#node-image-menu').dataset.node);break;case 'replace-current-image':chooseImageReplacement(current);break;case 'confirm-image-replacement':{const pending=pendingImageReplacement;if(readonly||!pending)break;$('#image-replace-dialog').close();pendingImageReplacement=null;if(node(pending.id)?.path!==pending.path){notice('当前图片已改变，请重新粘贴后替换。');break;}await upload(pending.files,{replacement:pending.id,expectedPath:pending.path});break;}case 'cancel-image-replacement':$('#image-replace-dialog').close();pendingImageReplacement=null;break;case 'note':addNote();break;case 'canvas-menu':canvasMenu();break;case 'export-menu':exportMenu();break;
+  switch(name){case 'developer-mode':toggleDeveloperMode();break;case 'handoff-copy':{const {snippet,context}=selectedHandoff();await copyHandoff(handoffPrompt(snippet,context));break;}case 'handoff-html':await copyHandoff(selectedHandoff().snippet.html);break;case 'handoff-download':{const {snippet,context}=selectedHandoff();download(handoffDocument(snippet,context),(context.title+'-片段.html').replace(/[\\/:*?"<>|]/g,'-'),'text/html');break;}case 'experience':if(devMode)toggleDeveloperMode(false);if(!experience)startExperience();break;case 'experience-exit':exitExperience();break;case 'export-prototype':await exportFile('all','prototype');break;case 'image':replaceImage=null;closeMenus();$('#image-input').multiple=true;$('#image-input').click();break;case 'replace-image':chooseImageReplacement($('#node-image-menu').dataset.node);break;case 'replace-current-image':chooseImageReplacement(current);break;case 'confirm-image-replacement':{const pending=pendingImageReplacement;if(readonly||!pending)break;$('#image-replace-dialog').close();pendingImageReplacement=null;if(node(pending.id)?.path!==pending.path){notice('当前图片已改变，请重新粘贴后替换。');break;}await upload(pending.files,{replacement:pending.id,expectedPath:pending.path});break;}case 'cancel-image-replacement':$('#image-replace-dialog').close();pendingImageReplacement=null;break;case 'note':addNote();break;case 'canvas-menu':canvasMenu();break;case 'export-menu':exportMenu();break;
     case 'undo':if(!readonly&&history.past.length){model=history.undo(model);dirty=true;selected=null;updateHistoryButtons();scheduleSave();renderAll();}break;
     case 'fit':fit();break;case 'zoom-in':zoom(1.15);break;case 'zoom-out':zoom(1/1.15);break;
     case 'panel-sidebar':togglePanel('sidebar');break;case 'panel-inspector':togglePanel('inspector');break;
@@ -706,7 +763,7 @@ $('#canvas-viewport').onpointerdown=event=>{
 };
 $('#canvas-viewport').addEventListener('wheel',event=>{event.preventDefault();if(event.ctrlKey||event.metaKey)zoom(wheelZoomFactor(event.deltaY,zoomSensitivity,event.deltaMode),event);else{camera.x-=event.deltaX;camera.y-=event.deltaY;transform();}},{passive:false});
 $('#image-preview-dialog').addEventListener('cancel',event=>{event.preventDefault();backFromImagePreview();});
-document.addEventListener('keydown',event=>{if(!event.defaultPrevented&&event.key==='Escape'&&!$('#branch-dialog').open){if($('#image-preview-dialog').open){event.preventDefault();backFromImagePreview();return;}if(experience){event.preventDefault();exitExperience();return;}}if(event.defaultPrevented||$('#image-replace-dialog').open)return;if(event.key==='Escape'){closeAnnotationEditor();closeMenus();cancelConnection?.();mode=null;linkCaptureTarget=null;renderOverlays();}if(event.target.closest('input,textarea,select,[contenteditable]'))return;
+document.addEventListener('keydown',event=>{if(devMode&&event.key==='Escape'){event.preventDefault();toggleDeveloperMode(false);return;}if(!event.defaultPrevented&&event.key==='Escape'&&!$('#branch-dialog').open){if($('#image-preview-dialog').open){event.preventDefault();backFromImagePreview();return;}if(experience){event.preventDefault();exitExperience();return;}}if(event.defaultPrevented||$('#image-replace-dialog').open)return;if(event.key==='Escape'){closeAnnotationEditor();closeMenus();cancelConnection?.();mode=null;linkCaptureTarget=null;renderOverlays();}if(event.target.closest('input,textarea,select,[contenteditable]'))return;
   if(event.code==='Space'&&!current&&!event.target.closest('button,summary')){event.preventDefault();spacePressed=true;return;}
   if(event.key==='Escape'&&!current){activeCanvasGesture?.();selectNodes([]);return;}
   if(!readonly&&!current&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();selectNodes(activeCanvasNodes().filter(n=>!linesHidden||!isBranch(n)).map(n=>n.id));return;}
@@ -741,19 +798,51 @@ if(boot.projects?.length){
     catch(error){projectSelect.value=boot.projectId;projectSelect.disabled=false;notice(error.message,[],'save');}
   };
 } else projectSelect.hidden=true;
+function runtimeUpdateBlocked(){
+  if(devMode||conflict||experience||exporting||dirty||saving||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return true;
+  if(document.activeElement?.matches('input,textarea,select,[contenteditable]')||document.querySelector('dialog[open]'))return true;
+  for(const frame of current&&frames[current]?[frames[current]]:[]){
+    const doc=frame.isConnected&&frame.contentDocument;if(!doc){if(frame.isConnected)return true;continue;}
+    if(doc.activeElement?.matches('input,textarea,select,[contenteditable="true"]')||doc.querySelector('dialog[open],[data-current-stage="running"],[data-mobile-stage="running"],[data-upload-state="uploading"]'))return true;
+    if([...doc.querySelectorAll('input,textarea,select')].some(el=>{if(el.closest?.('[hidden],template'))return false;return el.type==='checkbox'||el.type==='radio'?el.checked!==el.defaultChecked:el.tagName==='SELECT'?[...el.options].some(o=>o.selected!==o.defaultSelected):el.value!==el.defaultValue;}))return true;
+    if(doc.querySelector('[data-prototype-attachments] [data-mobile-attachment],.sixbot-mobile__selections [data-mobile-attachment]'))return true;
+    if([...doc.querySelectorAll('.sixbot-composer__input,.sixbot-mobile__input')].some(el=>el.textContent?.trim()||el.querySelector?.('[data-mobile-skill],.sixbot-skill-token,.sixbot-query-token')))return true;
+  }return false;
+}
+function reloadUpdatedWorkbench(){
+  if(runtimeUpdateBlocked())return false;
+  try{
+    saveCanvasCamera();saveView();const viewport=$('#page-viewport');
+    sessionStorage.setItem('yuanxing-runtime-return:'+location.pathname,JSON.stringify({moduleId,current,selected,camera,cameras,flowContext,linesHidden,recycleOpen,scroll:[viewport?.scrollLeft||0,viewport?.scrollTop||0]}));
+  }catch{return false;}
+  location.reload();return true;
+}
+function restoreRuntimeView(){
+  try{
+    const key='yuanxing-runtime-return:'+location.pathname,value=sessionStorage.getItem(key);if(!value)return;const saved=JSON.parse(value);sessionStorage.removeItem(key);
+    if(!model.modules.some(m=>m.id===saved.moduleId))return;
+    moduleId=saved.moduleId;current=model.nodes.some(n=>n.id===saved.current)?saved.current:null;selected=saved.selected;
+    if(selected?.type==='node'&&!node(selected.id)||selected?.type==='nodes'&&selected.ids.some(id=>!node(id)))selected=null;
+    camera=saved.camera;cameras=saved.cameras;flowContext=saved.flowContext;linesHidden=saved.linesHidden;recycleOpen=saved.recycleOpen;renderAll();
+    requestAnimationFrame(()=>{const viewport=$('#page-viewport');if(viewport){viewport.scrollLeft=saved.scroll[0];viewport.scrollTop=saved.scroll[1];}});
+  }catch{/* 无法恢复时仍保留普通视图偏好。 */}
+}
 async function refreshSources(){
-  if(readonly||document.hidden||dirty||saving||sourceRefreshFlight||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return;
+  if(readonly||document.hidden||dirty||saving||conflict||sourceRefreshFlight||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return;
+  if(runtimeUpdateBlocked())return;
   const requestedRevision=revision;sourceRefreshFlight=true;
   try{
     const metadata=await fetch(apiBase+'/api/project/status');if(!metadata.ok)return;const status=await metadata.json();
     if(dirty||saving||revision!==requestedRevision||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return;
+    if(status.runtimeVersion&&loadedRuntimeVersion&&status.runtimeVersion!==loadedRuntimeVersion){if(pendingRuntimeVersion!==status.runtimeVersion){pendingRuntimeVersion=status.runtimeVersion;return;}reloadUpdatedWorkbench();return;}
+    pendingRuntimeVersion=null;
     if(status.revision===revision&&status.sourceVersion===bundle.sourceVersion)return;
     const r=await fetch(apiBase+'/api/project');if(!r.ok)return;const next=await r.json();
     // 请求发出后可能发生剪切、粘贴及保存；旧响应不能替换更新后的本地状态。
-    if(dirty||saving||revision!==requestedRevision||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId||document.activeElement?.matches('input,textarea,[contenteditable]'))return;
-    if(next.revision!==revision){model=next.model;revision=next.revision;history.clear();bundle=next;selected=null;if(!node(current))current=null;renderAll();}
-    else {next.images={...bundle.images,...next.images};const changed=next.sourcesSignature!==bundle.sourcesSignature;bundle=next;if(changed){positions={};missing.clear();if(current){viewer();renderInspector();}else canvas();}}
+    if(dirty||saving||revision!==requestedRevision||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId||runtimeUpdateBlocked()||document.activeElement?.matches('input,textarea,[contenteditable]'))return;
+    if(next.revision!==revision){model=next.model;baseModel=clone(model);revision=next.revision;history.clear();bundle=next;selected=null;if(!node(current))current=null;renderAll();}
+    else {next.images={...bundle.images,...next.images};const changed=next.sourcesSignature!==bundle.sourcesSignature,currentChanged=current&&canvasPreviewSignature(node(current),next)!==canvasPreviewSignature(node(current),bundle);bundle=next;if(changed){positions={};missing.clear();if(current){if(currentChanged)viewer();renderInspector();}else canvas();}}
   }catch{/* 本地服务暂不可用，已编辑内容留在内存，保存操作负责提示与重试。 */}
   finally{sourceRefreshFlight=false;}
 }
-try{if(boot.bundle){bundle=boot.bundle;model=bundle.model;flowContext=clone(model.contextDefaults||{});}else await reload(false);let restored=null;try{restored=restoreView(model,JSON.parse(localStorage.getItem(viewKey())||'null'));}catch{}moduleId=restored?.moduleId||model.entryModule||model.modules[0]?.id;current=restored?.current||null;selected=current?{type:'node',id:current}:null;if(restored){camera=restored.camera||camera;cameras=restored.cameras;flowContext=restored.flowContext;linesHidden=restored.linesHidden;}if(experience)startExperience(boot.flow);else{renderAll();if(!current&&!restored?.camera)fit();}viewReady=true;saveView();if(!readonly){setInterval(refreshSources,3500);}}catch(error){notice('无法打开工作台：'+error.message,[['重试',()=>location.reload()]]);}
+try{if(boot.bundle){bundle=boot.bundle;model=bundle.model;flowContext=clone(model.contextDefaults||{});baseModel=clone(model);}else await reload(false);loadedRuntimeVersion??=bundle.runtimeVersion;let restored=null;try{restored=restoreView(model,JSON.parse(localStorage.getItem(viewKey())||'null'));}catch{}moduleId=restored?.moduleId||model.entryModule||model.modules[0]?.id;current=restored?.current||null;selected=current?{type:'node',id:current}:null;if(restored){camera=restored.camera||camera;cameras=restored.cameras;flowContext=restored.flowContext;linesHidden=restored.linesHidden;}if(experience)startExperience(boot.flow);else{renderAll();if(!current&&!restored?.camera)fit();}viewReady=true;restoreRuntimeView();saveView();if(!readonly){setInterval(refreshSources,3500);}}catch(error){notice('无法打开工作台：'+error.message,[['重试',()=>location.reload()]]);}

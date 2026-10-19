@@ -3,7 +3,7 @@ import path from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
-import {createStore,createHandler} from './server.mjs';
+import {createStore,createHandler,gracefulShutdown} from './server.mjs';
 
 const validId=id=>typeof id==='string'&&/^[a-zA-Z][\w-]*$/.test(id);
 export async function readWorkspace(file){
@@ -68,7 +68,7 @@ export function createWorkspaceHandler(file,token,{project}={}){
 
 export async function serveWorkspace(file,{port=4318,open=false,project,sessionToken}={}){
   const config=await readWorkspace(file);if(project&&!config.projects.some(item=>item.id===project))throw new Error('启动项目不存在');
-  const server=createServer(createWorkspaceHandler(file,sessionToken||randomBytes(24).toString('hex'),{project}));
+  const server=gracefulShutdown(createServer(createWorkspaceHandler(file,sessionToken||randomBytes(24).toString('hex'),{project})));
   server.on('error',error=>{console.error(error.code==='EADDRINUSE'?'端口已占用，请指定 --port。':error.message);process.exitCode=1;});
   server.listen(port,'127.0.0.1',()=>{
     const url=`http://127.0.0.1:${server.address().port}`;console.log(`元形工作区：${url}`);

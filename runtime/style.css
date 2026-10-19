@@ -345,3 +345,6 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 
 /* 完整产品直接使用页面内的控件、悬浮态与坐标。 */
 .declarative-pages #page-stage.native-prototype>.page-frame{pointer-events:auto}
+
+.handoff-menu{position:relative}.handoff-menu>summary{list-style:none;cursor:pointer;padding:4px 8px;color:var(--muted);font-size:18px}.handoff-menu>summary::-webkit-details-marker{display:none}.handoff-menu>div{position:absolute;right:0;top:100%;min-width:150px;padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px #0002;z-index:30}.handoff-menu button{width:100%;text-align:left;white-space:nowrap}.handoff-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--line);font-size:12px}.handoff-tools nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0}.handoff-tools nav span{color:var(--muted)}.handoff-tools button{font-size:12px;padding:4px 7px}.handoff-actions{display:flex;gap:6px;flex-shrink:0}.handoff-mode #page-stage>.page-frame{pointer-events:auto}
+.experience.handoff-mode .viewer-toolbar{display:grid!important}

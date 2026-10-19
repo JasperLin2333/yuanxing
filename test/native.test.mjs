@@ -21,6 +21,6 @@ test('未绑定输入保留原生行为；禁用控件不跳转；表单校验�
 });
 test('完整原型跳过外层热点与替身表单，评审仍保留原有打点机制',async()=>{
   const source=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),controller=source.slice(source.indexOf('function renderOverlays(){'),source.indexOf('function renderPageHotspots('));let removed=0,overlays=0;
-  const stage={querySelectorAll:()=>[{remove(){removed++;}}]},state={updateAnnotationButton(){},current:'home',node:()=>({kind:'html'}),$:()=>stage,experience:true,projectExtension:{nativeInteraction:true,renderOverlays(){overlays++;}},frames:{},mode:null,pageScale:.65};
+  const stage={querySelectorAll:()=>[{remove(){removed++;}}]},state={devMode:false,updateAnnotationButton(){},current:'home',node:()=>({kind:'html'}),$:()=>stage,experience:true,projectExtension:{nativeInteraction:true,renderOverlays(){overlays++;}},frames:{},mode:null,pageScale:.65};
   vm.runInContext(controller,vm.createContext(state));state.renderOverlays();assert.equal(removed,1);assert.equal(overlays,0);
 });

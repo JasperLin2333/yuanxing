@@ -8,7 +8,7 @@ import vm from 'node:vm';
 import {clone,validate,exportSubset,exportIssues,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,compactCanvas,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,snapNodePosition,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,connectionDirections,adaptCanvasLayout,isBranch,canvasNodeWidth,canvasNodeHeight,autoLayout,History,markdown,expandHTML,descriptionImagePaths,readDescription,eligibleEdges,nextContext,connectionPoint,connectionPath,connectionRoute,restoreView} from '../runtime/core.mjs';
 import {createStore,createHandler,standalone,safePath} from '../runtime/server.mjs';
 import {copyCanvasSelection,pasteCanvasSelection,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from '../runtime/core.mjs';
-import {reconcileCanvasCards} from '../runtime/library.mjs';
+import {reconcileCanvasCards,createLibrary} from '../runtime/library.mjs';
 
 const fixture=()=>({version:1,title:'测试项目',modules:[{id:'a',title:'模块甲',entry:'one'},{id:'b',title:'模块乙',entry:'two'},{id:'c',title:'模块丙',entry:'unused'}],nodes:[{id:'one',module:'a',title:'第一页',kind:'html',path:'states/one.html',width:1280,height:800,x:60,y:60},{id:'two',module:'b',title:'第二页',kind:'html',path:'states/two.html',width:375,height:812,x:60,y:60},{id:'unused',module:'c',title:'无关页面',kind:'note',width:640,height:320,x:60,y:60}],edges:[{id:'go',from:'one',to:'two',label:'下一步',selector:'#go'}],annotations:[{id:'pin',node:'one',point:[.3,.5],text:'原文案 → 新文案'},{id:'unrelated',node:'unused',text:'其他说明'}]});
 test('普通提示五秒后消失，新提示重置计时，并支持手动关闭',async()=>{
@@ -45,7 +45,7 @@ test('剪切和粘贴只移除或新增对应卡片，已有 iframe DOM 保持�
 });
 async function sourceRefreshFixture(){
   const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),source=app.slice(app.indexOf('async function refreshSources(){'),app.indexOf('try{if(boot.bundle)'));let respond,started,requests=0,renders=0;const ready=new Promise(resolve=>started=resolve);
-  const state={apiBase:"",readonly:false,dirty:false,saving:false,sourceRefreshFlight:false,annotationEditorId:null,pendingImages:new Set(),activeCanvasGesture:null,cancelConnection:null,revision:'before',model:fixture(),bundle:{sourcesSignature:'before',images:{}},selected:null,current:null,positions:{},missing:new Set(),history:{clear(){}},node:()=>null,renderAll:()=>renders++,canvas:()=>renders++,viewer:()=>renders++,renderInspector(){},document:{activeElement:null},fetch:url=>{if(url.endsWith('/status'))return Promise.resolve({ok:true,json:async()=>({revision:'external',sourceVersion:'external'})});requests++;return new Promise(resolve=>{respond=resolve;started();});}};
+  const state={apiBase:"",readonly:false,dirty:false,saving:false,conflict:false,baseModel:fixture(),clone,loadedRuntimeVersion:"runtime-before",pendingRuntimeVersion:null,runtimeUpdateBlocked:()=>false,reloadUpdatedWorkbench(){state.runtimeReloads=(state.runtimeReloads||0)+1;},sourceRefreshFlight:false,annotationEditorId:null,pendingImages:new Set(),activeCanvasGesture:null,cancelConnection:null,revision:'before',model:fixture(),bundle:{sourcesSignature:'before',images:{}},selected:null,current:null,positions:{},missing:new Set(),history:{clear(){}},node:()=>null,renderAll:()=>renders++,canvas:()=>renders++,viewer:()=>renders++,renderInspector(){},document:{activeElement:null},fetch:url=>{if(url.endsWith('/status'))return Promise.resolve({ok:true,json:async()=>({revision:'external',sourceVersion:'external'})});requests++;return new Promise(resolve=>{respond=resolve;started();});}};
   const context=vm.createContext(state);vm.runInContext(source+'globalThis.runRefresh=refreshSources;',context);
   return {context,ready,run:()=>context.runRefresh(),respond:value=>respond({ok:true,json:async()=>value}),requests:()=>requests,renders:()=>renders};
 }
@@ -109,6 +109,17 @@ test('覆盖目标已变化、被删除或新图片无效时不改动任何节�
 test('回收站收纳隐藏原型、图片和说明，排除可见内容与分叉点',()=>{
   const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden-page',overview:false,overviewAlias:'one'},{...clone(m.nodes[1]),id:'hidden-image',kind:'image',overview:false},{...clone(m.nodes[2]),id:'hidden-note',overview:false},{...clone(m.nodes[2]),id:'hidden-branch',presentation:'branch',overview:false});
   const before=clone(m);assert.deepEqual(recycleNodes(m).map(n=>n.id),['hidden-page','hidden-image','hidden-note']);assert.deepEqual(m,before);
+});
+test('回收站角标与实际列表一致，85 个内部状态不计数，删除最后一项归零',()=>{
+  const m=fixture();for(let i=0;i<85;i++)m.nodes.push({...clone(m.nodes[0]),id:'internal-'+i,overview:false,canvas:false});
+  m.nodes.push({...clone(m.nodes[2]),id:'hidden-branch',overview:false,presentation:'branch'});
+  const element=()=>({children:[],dataset:{},className:'',append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},setAttribute(){},querySelector(selector){return this.children.find(n=>n.className.split(' ').includes(selector.slice(1)))||this.children.map(n=>n.querySelector(selector)).find(Boolean)||null;}});
+  const previous=globalThis.document;globalThis.document={activeElement:{},createElement:element,createElementNS:element};
+  try{
+    const nav=element(),library=createLibrary({getModel:()=>m,getModule:()=>null,openRecycle(){}});
+    const check=count=>{library.renderSidebar(nav);assert.equal(nav.querySelector('.library-recycle-count').textContent,String(count));assert.equal(recycleNodes(m).length,count);};
+    check(0);m.nodes.push({...clone(m.nodes[0]),id:'recycled',overview:false});check(1);m.nodes.pop();check(0);
+  }finally{if(previous===undefined)delete globalThis.document;else globalThis.document=previous;}
 });
 test('回收站网格完整排列混合卡片，拖动只保存独立位置，移除一项不挪动其余内容',()=>{
   const m=fixture();for(let i=0;i<9;i++)m.nodes.push({...clone(m.nodes[i%2]),id:`hidden-${i}`,overview:false,x:60,y:60});
@@ -428,4 +439,25 @@ test('图片上传保存到项目，并能内嵌至分享',()=>temporary(async r
 test('越界路径及符号链接拒绝读取',()=>temporary(async root=>{const store=await setup(root);await assert.rejects(safePath(store.artifact,'../secret'));await fs.symlink(os.tmpdir(),path.join(store.artifact,'outside'));await assert.rejects(safePath(store.artifact,'outside','yes'));}));
 test('接口按本机 Host 与会话令牌限制写入，不启动网络服务',()=>temporary(async root=>{const store=await setup(root),handler=createHandler(store,'secret'),data=await store.readModel();assert.equal((await request(handler,'PUT','/api/project',data)).status,403);assert.equal((await request(handler,'GET','/api/project',null,{host:'evil.example'})).status,403);assert.equal((await request(handler,'PUT','/api/project',data,{authorization:'Bearer secret',origin:'https://evil.example'})).status,403);assert.equal((await request(handler,'PUT','/api/project',data,{authorization:'Bearer secret'})).status,200);}));
 test('单文件分享无外部资产，内容只读，说明注入安全',()=>temporary(async root=>{const store=await setup(root);const bundle=await store.load();bundle.model.annotations[0].text='</script><img src="https://example.invalid/x">';const html=await standalone(bundle,{module:'a'});assert.match(html,/"readonly":true/);assert.ok(!/<script[^>]+src=/.test(html));assert.ok(!/<link[^>]+href=["'](?!data:)/.test(html));assert.ok(!html.includes('<img src="https://example.invalid'));assert.match(html,/const esc=escapeHTML/);assert.ok(!html.includes('其他说明'));}));
+test('整项目和单模块的两种导出均排除回收站，保留内部交互且不改源项目',async()=>{
+  const model=fixture();
+  model.nodes.push({...clone(model.nodes[0]),id:'internal',overview:false,canvas:false},
+    {...clone(model.nodes[0]),id:'recycled-html',overview:false},
+    {...clone(model.nodes[0]),id:'recycled-image',kind:'image',overview:false},
+    {...clone(model.nodes[2]),id:'recycled-note',module:'a',overview:false,description:'![旧参考](assets/recycled-only.png)'});
+  model.edges.push({id:'to-internal',from:'one',to:'internal',selector:'#internal'},
+    {id:'to-recycled',from:'one',to:'recycled-html',selector:'#recycled'});
+  model.annotations.push({id:'old-pin',node:'recycled-html',text:'回收站批注'},{id:'old-edge-pin',edge:'to-recycled',text:'回收站连线批注'});
+  model.recyclePositions={'recycled-html':{x:60,y:60}};
+  const bundle={model,resources:{one:'<button id="go">继续</button>',two:'<p>第二页</p>',internal:'<!-- include:internal -->','recycled-html':'<!-- include:recycled -->','recycled-image':'data:image/png;base64,recycled-only'},fragments:{internal:'<p>内部交互</p>',recycled:'<p>回收站专属页面</p>'},images:{'assets/recycled-only.png':'data:image/png;base64,recycled-only'}},before=clone(bundle);
+  for(const module of [undefined,'a'])for(const view of ['review','prototype']){
+    const html=await standalone(bundle,{module,view}),saved=JSON.parse(html.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]).bundle;
+    assert.deepEqual(recycleNodes(saved.model),[]);assert(saved.model.nodes.some(n=>n.id==='internal'));
+    assert(saved.model.edges.some(e=>e.id==='to-internal'));assert(!saved.model.edges.some(e=>e.id==='to-recycled'));
+    assert(!saved.model.annotations.some(a=>a.id.startsWith('old-')));assert.deepEqual(saved.model.recyclePositions,{});
+    assert.deepEqual(Object.keys(saved.fragments),['internal']);assert.deepEqual(saved.images,{});
+    assert(!Object.keys(saved.resources).some(id=>id.startsWith('recycled-')));assert(!html.includes('回收站专属页面'));assert.deepEqual(validate(saved.model),[]);
+  }
+  assert.deepEqual(bundle,before);
+});
 test('旧 manifest 的页面、逻辑和实际转移来源可导入',()=>temporary(async root=>{await fs.mkdir(path.join(root,'artifact/states'),{recursive:true});await fs.writeFile(path.join(root,'artifact/manifest.json'),JSON.stringify({requirements:[{id:'r',title:'旧页面',states:[{id:'a',html:'states/a.html',initial:true},{id:'b',html:'states/b.html'}],transitions:[{id:'T1',to:'b'}],logic:[{id:'L1',text:'旧规则'}]}]}));await fs.writeFile(path.join(root,'artifact/states/a.html'),'<button data-transition-id="T1">继续</button>');await fs.writeFile(path.join(root,'artifact/states/b.html'),'<p>结果</p>');const store=await createStore(root),bundle=await store.load();assert.equal(bundle.model.edges[0].from,'r:a');assert.equal(bundle.model.annotations[0].text,'旧规则');assert.equal(validate(bundle.model).length,0);}));
