@@ -1,5 +1,6 @@
 // 编辑端、离线分享端与校验共用的数据操作。
 import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty} from './routing.mjs';
+import {validateDocument,pruneDocument,documentAssetPaths} from './document.mjs';
 export const clone = value => JSON.parse(JSON.stringify(value));
 export const uid = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -376,7 +377,7 @@ export const isImagePath = value => typeof value==='string' && /^assets\/[^?#\\\
 const imagePattern = /`[^`]*`|!\[([^\]\n]*)\]\(([^)\n]+)\)/g;
 export function descriptionImagePaths(model) {
   const texts=[...model.nodes.map(n=>n.description),...model.edges.map(e=>e.description),...model.annotations.map(a=>a.text),...Object.values(model.rules||{})];
-  return [...new Set(texts.flatMap(text=>[...String(text||'').matchAll(imagePattern)].filter(m=>m[2]!==undefined).map(m=>m[2])))];
+  return [...new Set([...texts.flatMap(text=>[...String(text||'').matchAll(imagePattern)].filter(m=>m[2]!==undefined).map(m=>m[2])),...documentAssetPaths(model)])];
 }
 export function expandHTML(text, fragments, trail=[]) {
   return text.replace(/<!--\s*include:([^>]+?)\s*-->/g,(_,key)=>{
@@ -435,6 +436,7 @@ export function validate(model) {
     const seen=new Set();if(!Array.isArray(model[field]))errors.push('体验流程格式不正确');
     else for(const flow of model[field]){if(!flow.id||seen.has(flow.id)||typeof flow.title!=='string'||!ids.has(flow.entry)||isBranch(model.nodes.find(n=>n.id===flow.entry))||flow.context!==undefined&&!isFlowContext(flow.context))errors.push('体验流程入口或条件不正确');seen.add(flow.id);}
   }
+  errors.push(...validateDocument(model));
   if(descriptionImagePaths(model).some(path=>!isImagePath(path)))errors.push('说明图片需使用项目 assets 目录中的 PNG、JPEG 或 WebP 文件');
   return errors;
 }
@@ -500,7 +502,7 @@ export function normalizeBranchJunctions(model){
   }
   return removed;
 }
-export function removeConnections(model,ids){dropConnections(model,ids);normalizeBranchJunctions(model);}
+export function removeConnections(model,ids){dropConnections(model,ids);normalizeBranchJunctions(model);pruneDocument(model);}
 export function compactCanvas(model,moduleId) {
   const nodes=moduleNodes(model,moduleId);
   for(const [axis,size,gap] of [['x',canvasNodeWidth,80],['y',canvasNodeHeight,100]]){
@@ -535,6 +537,7 @@ export function removeNodes(model,ids) {
   for(const field of ["flows","experiences"])if(model[field])model[field]=model[field].filter(flow=>model.nodes.some(n=>n.id===flow.entry));
   for(const module of model.modules)if(module.entry&&!model.nodes.some(n=>n.id===module.entry))delete module.entry;
   normalizeBranchJunctions(model);
+  pruneDocument(model);
 }
 export function removeCanvasNodes(model,moduleId,ids){
   const selected=new Set(ids),byId=new Map(model.nodes.map(n=>[n.id,n])),references=new Set(model.nodes.filter(n=>n.module!==moduleId&&selected.has(n.id)).map(n=>n.id));
@@ -585,6 +588,7 @@ export function exportSubset(model, moduleId) {
   if(result.recyclePositions)result.recyclePositions=Object.fromEntries(Object.entries(result.recyclePositions).filter(([id])=>keep.has(id)));
   if(result.referencePositions)result.referencePositions=Object.fromEntries(Object.entries(result.referencePositions).filter(([id])=>moduleIds.has(id)).map(([id,positions])=>[id,Object.fromEntries(Object.entries(positions).filter(([nodeId])=>keep.has(nodeId)))]));
   if(result.rules){const used=new Set([...result.nodes,...result.edges].map(v=>v.rule).filter(Boolean));result.rules=Object.fromEntries(Object.entries(result.rules).filter(([id])=>used.has(id)));}
+  pruneDocument(result);
   return result;
 }
 export function exportIssues(model){
@@ -665,14 +669,15 @@ export class History {
   clear(){this.past=[];this.group=null;}
 }
 export function markdown(text, images={}) {
-  const lines=String(text||'').split('\n'); let out='',list=false,table=false;
+  const lines=String(text||'').split('\n'); let out='',list=null,table=false;
   const inline=s=>{
     let result='',last=0;
-    for(const m of s.matchAll(/!\[([^\]\n]*)\]\(([^)\n]+)\)|`([^`]+)`|\*\*(.+?)\*\*/g)){
+    for(const m of s.matchAll(/!\[([^\]\n]*)\]\(([^)\n]+)\)|`([^`]+)`|\*\*(.+?)\*\*|\*([^*\n]+)\*/g)){
       result+=escapeHTML(s.slice(last,m.index));
       if(m[2]!==undefined){const src=images[m[2]];result+=isImagePath(m[2])&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(src||'')?`<img src="${escapeHTML(src)}" alt="${escapeHTML(m[1])}" data-asset-path="${escapeHTML(m[2])}">`:`<span class="missing-image">${escapeHTML(m[1]||'图片')}（图片未载入）</span>`;}
       else if(m[3]!==undefined)result+=`<code>${escapeHTML(m[3])}</code>`;
-      else result+=`<strong>${inline(m[4])}</strong>`;
+      else if(m[4]!==undefined)result+=`<strong>${inline(m[4])}</strong>`;
+      else result+=`<em>${inline(m[5])}</em>`;
       last=m.index+m[0].length;
     }
     return result+escapeHTML(s.slice(last));
@@ -686,11 +691,12 @@ export function markdown(text, images={}) {
       out+='<tr>'+line.trim().slice(1,-1).split('|').map(c=>`<${header?'th':'td'}>${inline(c.trim())}</${header?'th':'td'}>`).join('')+'</tr>';continue;
     }
     if(table){out+='</table>';table=false;}
-    if(/^\s*[-*]\s/.test(line)){if(!list){out+='<ul>';list=true;}out+=`<li>${inline(line.replace(/^\s*[-*]\s/,''))}</li>`;continue;}
-    if(list){out+='</ul>';list=false;}
+    const item=line.match(/^\s*(?:([-*])\s+|(\d+)\.\s+)(.*)$/);
+    if(item){const tag=item[2]?'ol':'ul';if(list!==tag){if(list)out+=`</${list}>`;out+=`<${tag}>`;list=tag;}out+=`<li>${inline(item[3])}</li>`;continue;}
+    if(list){out+=`</${list}>`;list=null;}
     out+=line?`<p>${inline(line)}</p>`:'<br>';
   }
-  return out+(list?'</ul>':'')+(table?'</table>':'');
+  return out+(list?`</${list}>`:'')+(table?'</table>':'');
 }
 // 说明编辑区只序列化文字、基础格式与已上传图片，不保留外部粘贴的 HTML。
 export function readDescription(root) {
@@ -702,8 +708,9 @@ export function readDescription(root) {
     if(tag==='IMG'){const path=el.getAttribute('data-asset-path');return isImagePath(path)?`![${(el.getAttribute('alt')||'图片').replace(/[\[\]\n]/g,'')}](${path})`:'';}
     if(tag==='BR')return '\n';
     if(tag==='STRONG'||tag==='B')return `**${children(el)}**`;
+    if(tag==='EM'||tag==='I')return `*${children(el)}*`;
     if(tag==='CODE')return '`'+children(el)+'`';
-    if(tag==='UL'||tag==='OL')return [...el.children].map(li=>'- '+children(li).trim()).join('\n')+'\n\n';
+    if(tag==='UL'||tag==='OL')return [...el.children].map((li,index)=>(tag==='OL'?`${index+1}. `:'- ')+children(li).trim()).join('\n')+'\n\n';
     if(tag==='TABLE'){
       const rows=[...el.querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>children(td).trim().replace(/\n/g,' ')));
       return rows.map((cells,i)=>'|'+cells.join('|')+'|\n'+(i===0?'|'+cells.map(()=>'---').join('|')+'|\n':'')).join('')+'\n';

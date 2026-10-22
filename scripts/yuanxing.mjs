@@ -23,7 +23,7 @@ node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] 
 node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
 node scripts/yuanxing.mjs check --root <目录>
 node scripts/yuanxing.mjs serve --root <目录> [--port 4318] [--open]
-node scripts/yuanxing.mjs export --root <目录> --view review|prototype [--module 标识] [--flow 标识] [--out 文件.html] [--replace]
+node scripts/yuanxing.mjs export --root <目录> --view review|prototype|document [--module 标识] [--flow 标识] [--out 文件.html] [--replace]
 
 --rect 使用 0～1 的相对坐标。只表达画布关系时使用 --diagram。
 HTML 支持本地 CSS、图片和普通 JavaScript；外部服务与工程模块需先适配。
@@ -97,11 +97,11 @@ export async function run(args,{sessionToken}={}){
     console.log(`结构与资源检查通过：${bundle.model.nodes.length} 个页面，${bundle.model.edges.length} 条关系`);return;
   }
   if(command==='export'){
-    await store.check();const view=flags.view||'review';if(!['review','prototype'].includes(view))throw new Error('视图应为 review 或 prototype');
+    await store.check();const view=flags.view||'review';if(!['review','prototype','document'].includes(view))throw new Error('视图应为 review、prototype 或 document');
     const bundle=await store.load();
     if(flags.module&&!bundle.model.modules.some(m=>m.id===flags.module))throw new Error('模块不存在');
     if(flags.flow&&!flowEntries(bundle.model).some(flow=>flow.id===flags.flow))throw new Error('体验流程不存在');
-    const out=path.resolve(flags.out||path.join(root,'dist',view==='prototype'?'prototype.html':'workbench.html'));
+    const out=path.resolve(flags.out||path.join(root,'dist',view==='prototype'?'prototype.html':view==='document'?'document.html':'workbench.html'));
     if(sameOrInside(path.join(root,'artifact'),out)||!out.toLowerCase().endsWith('.html'))throw new Error('导出应为 artifact 目录以外的 HTML 文件');
     if(await exists(out)){const stat=await fs.lstat(out);if(stat.isSymbolicLink()||!stat.isFile()||!flags.replace)throw new Error('输出已存在；确认是生成文件后使用 --replace');}
     const html=await standalone(bundle,{module:flags.module,entryModule:flags.module,view,flow:flags.flow,extension:store.extension});

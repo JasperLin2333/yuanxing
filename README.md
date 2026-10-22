@@ -4,7 +4,7 @@
 
 把产品想法变成团队能讨论、能体验、能继续修改的共同设计。用原型、流程和说明表达意图，让人和人、人和 AI 围绕同一份设计继续推进。
 
-**[直接体验](https://jasperlin2333.github.io/yuanxing/demo/prototype.html) · [查看画布](https://jasperlin2333.github.io/yuanxing/demo/review.html) · [开始使用](#start) · [产品介绍](https://jasperlin2333.github.io/yuanxing/) · [查看发布](https://github.com/JasperLin2333/yuanxing/releases/latest)**
+**[直接体验](https://jasperlin2333.github.io/yuanxing/demo/prototype.html) · [查看画布](https://jasperlin2333.github.io/yuanxing/demo/review.html) · [阅读交互文档](https://jasperlin2333.github.io/yuanxing/demo/document.html) · [开始使用](#start) · [产品介绍](https://jasperlin2333.github.io/yuanxing/) · [查看发布](https://github.com/JasperLin2333/yuanxing/releases/latest)**
 
 [![元形：人和 AI 围绕同一份设计表达意图、体验流程、讨论反馈并继续修改](assets/readme-hero.png)](assets/readme-hero.svg)
 
@@ -22,7 +22,8 @@
 | **让团队形成共同理解** | 在同一画布上查看页面关系、关键条件与批注，围绕具体流程交流 |
 | **和 AI 一起继续设计** | 用自然语言描述新增或修改，让 AI 更新页面与交互，保留已有设计和人工整理 |
 | **通过体验补充判断** | 点击、选择、输入，走完已设计的路径，发现遗漏与需要进一步讨论的地方 |
-| **把设计传给下一位** | 导出单个 HTML，让同事离线查看、体验并反馈 |
+| **写清具体需求** | 自由组合正文、对照表格与可操作的页面或组件，边阅读边体验 |
+| **把设计传给下一位** | 导出单个 HTML，让同事离线查看、体验，并读取结构化交付数据 |
 
 你也可以直接拖动、连线、打点批注，与 AI 继续打磨同一份设计。
 
@@ -44,7 +45,15 @@
 
 **[直接体验这个原型 →](https://jasperlin2333.github.io/yuanxing/demo/prototype.html)**
 
-截图来自公开的“客户分配”示例，界面与数据均为虚构。两种视图共用[同一份可编辑项目](examples/product-iteration/)。
+截图来自公开的“客户分配”示例，界面与数据均为虚构。三个视图共用[同一份可编辑项目](examples/product-iteration/)。
+
+### 交互式需求文档：按你的讲解方式组织
+
+像写文档一样输入需求，插入标题、图片、分栏和表格。原型可以放在上方，也可以放在表格左侧，右侧自由写详细说明；同一篇文档混合使用不同布局。页面与组件可直接输入、选择和操作，引用的仍是同一份原型源。
+
+让 AI 说清楚“把表单放在左侧，右侧补充确认与取消规则”，也可以自己编辑正文、拖动内容、调整列宽。已有说明只维护一份。
+
+**[打开交互式需求文档 →](https://jasperlin2333.github.io/yuanxing/demo/document.html)**
 
 ## 拿一个已有功能，走完一段完整流程
 
@@ -59,15 +68,16 @@
 
 不必先准备完整 PRD，也不必一次重画全部页面。先让这次变化表达清楚，在讨论和体验中发现问题，再把已确认的反馈落实到同一份源项目。
 
-## 一份设计，两种离线交付
+## 一份设计，三种查看方式
 
-| 流程评审工作台 | 完整原型 |
-| --- | --- |
-| 看页面关系、条件分支和说明 | 从指定入口连续操作 |
-| 适合推演、讲解和方案评审 | 适合演示、试用和收集反馈 |
-| 保留流程画布与页面批注 | 专注产品页面与真实操作 |
+| 流程画布 | 交互式需求文档 | 完整原型 |
+| --- | --- | --- |
+| 看页面关系、条件分支和批注 | 自由编排正文、表格、页面与组件 | 从指定入口连续操作 |
+| 推演与方案评审 | 需求讲解与研发阅读 | 演示、试用与反馈 |
 
-两种视图都能导出为**单个 HTML 文件**，内含页面、图片、脚本和样式。接收者在浏览器打开即可使用，无需安装元形或启动服务。导出自动排除回收站内容，保留原型交互需要的内部状态。
+三个视图都能导出为**单个 HTML 文件**，内含页面、图片、脚本和样式。接收者在浏览器打开即可使用，无需安装元形或启动服务。导出自动排除回收站内容，保留原型交互需要的内部状态。
+
+导出同时包含可直接解析的需求、状态、转移、逻辑与页面数据。条件分支和复杂绑定保留原生信息与具体转换差异；接入方式见[文档与交付格式](references/document.md)。
 
 右上角「⋯ → 开发交付模式」默认关闭，需要交付局部 UI 时再开启：选择区域与父级层级，复制包含源文件、DOM、样式和说明的交付内容，或下载片段 HTML。页面说明继续直接编辑。需要跨页面修改时，在当前对话中说明范围，由 Agent 结合业务含义查找关联内容并同步，交付时说明影响范围与差异。
 
@@ -115,7 +125,7 @@ npx skills add JasperLin2333/yuanxing --skill yuanxing
 
 画布上的布局、连线和批注可以继续编辑，局部改动保留已有整理；完整原型与导出使用同一份设计，讨论后的修改继续回到源项目。
 
-项目包含 [179 项自动化测试](test/)，覆盖连线与分叉、撤销、交互状态、多项目隔离、版本冲突和离线导出。日常操作细节见[工作台手册](references/workbench.md)。
+项目包含 [198 项自动化测试](test/)，覆盖文档编排与引用、交付数据、连线与分叉、交互状态、多项目隔离、版本冲突和离线导出。日常操作细节见[工作台手册](references/workbench.md)。
 
 <details>
 <summary><strong>先在本地跑一个案例</strong></summary>
@@ -149,6 +159,7 @@ node scripts/install.mjs --target "/你的宿主/skills/yuanxing"
 ```sh
 node scripts/yuanxing.mjs export --root ./my-iteration --view review
 node scripts/yuanxing.mjs export --root ./my-iteration --view prototype
+node scripts/yuanxing.mjs export --root ./my-iteration --view document
 ```
 
 文件保存到项目的 `dist/`，顶栏“导出 HTML”菜单也提供这两种方式。

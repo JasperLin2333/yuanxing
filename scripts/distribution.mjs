@@ -14,7 +14,7 @@ export function marketplaceSkill(markdown,target){
   const version=markdown.match(/^  version:\s*["']?([^"'\n]+)/m)?.[1],author=markdown.match(/^  author:\s*(.+)/m)?.[1];
   if(!version||!author)throw new Error('Skill 缺少 metadata.version 或 metadata.author');
   const common={version,display_name:'元形 · AI 产品原型工作台'};
-  const fields=target==='workbuddy'?{...common,display_name_en:'Yuanxing',description_zh:'通过自然语言组织多项目，将已设计交互串成完整原型并导出评审文件',description_en:'Design connected product prototypes through natural language and export offline HTML.',author}:{slug:'yuanxing',...common,displayName:common.display_name,summary:'复用截图和 HTML，用自然语言组织多项目、完整原型与流程评审'};
+  const fields=target==='workbuddy'?{...common,display_name_en:'Yuanxing',description_zh:'通过自然语言组织流程画布、完整原型和交互式需求文档，导出离线 HTML',description_en:'Design connected prototypes and flexible interactive requirements documents; export offline HTML.',author}:{slug:'yuanxing',...common,displayName:common.display_name,summary:'复用截图和 HTML，用自然语言编排流程、完整原型与交互式需求文档'};
   return markdown.replace(/^---\n/,()=>`---\n${Object.entries(fields).map(([key,value])=>key+': '+JSON.stringify(value)).join('\n')}\n`);
 }
 

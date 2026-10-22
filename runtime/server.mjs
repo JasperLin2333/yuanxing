@@ -6,6 +6,7 @@ import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {inlineHTML} from './resources.mjs';
 import {promisify} from 'node:util';
+import {compatibilityDataTag} from './compatibility.mjs';
 import {clone,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,recycleNodes,removeNodes,mergeProject} from './core.mjs';
 const exec=promisify(execFile),tool=path.dirname(fileURLToPath(import.meta.url));
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -123,7 +124,7 @@ export async function createStore(root,{builder,validator,extension}={}){
 }
 export async function standalone(bundle,{module,entryModule,view='review',flow,extension}={}){
   const projectExtension=typeof extension==='string'?await loadProjectExtension(extension):extension;
-  if(!['review','prototype'].includes(view))throw new Error('导出视图不正确');
+  if(!['review','prototype','document'].includes(view))throw new Error('导出视图不正确');
   const source=clone(bundle.model),recycled=recycleNodes(source).map(n=>n.id);
   if(recycled.length)removeNodes(source,recycled);
   const model=exportSubset(source,module);if(entryModule&&model.modules.some(m=>m.id===entryModule))model.entryModule=entryModule;
@@ -133,12 +134,13 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   for(const n of model.nodes.filter(n=>n.kind==='html'))assertOffline(expandHTML(resources[n.id],bundle.fragments),n.title);
   const fragments={},add=key=>{if(fragments[key]!==undefined)return;fragments[key]=bundle.fragments[key];for(const m of fragments[key].matchAll(/<!--\s*include:([^>]+?)\s*-->/g))add(m[1]);};for(const text of Object.values(resources))for(const m of text.matchAll(/<!--\s*include:([^>]+?)\s*-->/g))add(m[1]);
   const strip=text=>text.replace(/^import[^\n]+\n/gm,''),inline=text=>text.replace(/<\/script/gi,'<\\/script');
-  const css=await fs.readFile(path.join(tool,'style.css'),'utf8'),core=strip(await fs.readFile(path.join(tool,'core.mjs'),'utf8')),routing=strip(await fs.readFile(path.join(tool,'routing.mjs'),'utf8')),player=strip(await fs.readFile(path.join(tool,'player.mjs'),'utf8')),handoff=strip(await fs.readFile(path.join(tool,'handoff.mjs'),'utf8')),library=strip(await fs.readFile(path.join(tool,'library.mjs'),'utf8')),app=strip(await fs.readFile(path.join(tool,'app.mjs'),'utf8'));
+  const css=await fs.readFile(path.join(tool,'style.css'),'utf8'),documentCode=strip(await fs.readFile(path.join(tool,'document.mjs'),'utf8')),documentPlayer=strip(await fs.readFile(path.join(tool,'document-player.mjs'),'utf8')),core=strip(await fs.readFile(path.join(tool,'core.mjs'),'utf8')),routing=strip(await fs.readFile(path.join(tool,'routing.mjs'),'utf8')),player=strip(await fs.readFile(path.join(tool,'player.mjs'),'utf8')),handoff=strip(await fs.readFile(path.join(tool,'handoff.mjs'),'utf8')),library=strip(await fs.readFile(path.join(tool,'library.mjs'),'utf8')),app=strip(await fs.readFile(path.join(tool,'app.mjs'),'utf8'));
   const extensionCode=projectExtension?(await Promise.all(projectExtension.files.map(async file=>fs.readFile(await safePath(projectExtension.root,file),'utf8')))).map(strip).join('\n'):strip(await fs.readFile(path.join(tool,'extension.mjs'),'utf8'));
   const vendors=(await Promise.all(['libavoid.min.js','libavoid-routing.js'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n');
   const licenses=(await Promise.all(['LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE','THIRD-PARTY-README.md'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n\n');
   const data=JSON.stringify({readonly:true,view,flow,bundle:{model,resources,fragments,images}}).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
-  let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([routing,core,player,handoff,library,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
+  let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([routing,documentCode,core,player,documentPlayer,handoff,library,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
+  html=html.replace('</head>',()=>compatibilityDataTag({model,resources,fragments,images})+'</head>');
   return html;
 }
 async function body(req){const parts=[];let bytes=0;for await(const part of req){const buffer=Buffer.isBuffer(part)?part:Buffer.from(part);bytes+=buffer.length;if(bytes>64*1024*1024)throw new Error('图片或数据过大');parts.push(buffer);}return JSON.parse(Buffer.concat(parts,bytes).toString('utf8')||'{}');}
@@ -154,7 +156,7 @@ export function createHandler(store,token,{basePath="",projectId,projects}={}){r
     if(req.method==='GET'&&url.pathname==='/'){const runtimeVersion=(await store.status()).runtimeVersion;let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<script type="module" src="/app.mjs">',`<script>globalThis.YUANXING_BOOT={...${JSON.stringify({token,basePath,projectId,projects,runtimeVersion}).replace(/</g,"\\u003c")}};</script><script type="module" src="/app.mjs">`);if(basePath)html=html.replace('href="/style.css"',`href="${basePath}/style.css"`).replace('src="/app.mjs"',`src="${basePath}/app.mjs"`);return send(200,html,'text/html');}
     if(req.method==='GET'&&url.pathname==='/extension.mjs')return send(200,store.extension?await extensionSource(store.extension,store.extension.entry,basePath):await fs.readFile(path.join(tool,'extension.mjs'),'utf8'),'text/javascript');
     if(req.method==='GET'&&url.pathname.startsWith('/project-extension/')){const file=url.pathname.slice('/project-extension/'.length);if(!store.extension?.files.includes(file))return send(404,{error:'扩展资源不存在'});return send(200,await extensionSource(store.extension,file,basePath),'text/javascript');}
-    if(req.method==='GET'&&['/app.mjs','/handoff.mjs','/core.mjs','/routing.mjs','/library.mjs','/player.mjs','/style.css','/libavoid.min.js','/libavoid-routing.js'].includes(url.pathname))return send(200,await fs.readFile(path.join(tool,url.pathname.slice(1)),'utf8'),url.pathname.endsWith('.css')?'text/css':'text/javascript');
+    if(req.method==='GET'&&['/app.mjs','/document.mjs','/document-player.mjs','/handoff.mjs','/core.mjs','/routing.mjs','/library.mjs','/player.mjs','/style.css','/libavoid.min.js','/libavoid-routing.js'].includes(url.pathname))return send(200,await fs.readFile(path.join(tool,url.pathname.slice(1)),'utf8'),url.pathname.endsWith('.css')?'text/css':'text/javascript');
     send(404,{error:'入口不存在'});
   }catch(error){const detail=String(error.stderr||'').match(/ValueError:\s*([\s\S]*)/)?.[1]?.trim();send(error.status||400,{error:detail||error.message,...error.details});}
 };}

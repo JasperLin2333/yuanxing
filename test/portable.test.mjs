@@ -26,12 +26,12 @@ test('案例复用旧页面截图，根据角色进入不同分支，批注不�
   assert(bundle.resources.list.includes('data:image/png;base64,'));assert.equal(flowEntries(model).length,2);
 });
 
-test('从同一来源导出两种离线单文件，所有脚本都能静态解析',async t=>{
+test('从同一来源导出三种离线单文件，所有可执行脚本都能静态解析',async t=>{
   const bundle=await(await createStore(await sample(t))).load();
-  for(const view of ['review','prototype']){
+  for(const view of ['review','prototype','document']){
     const html=await standalone(bundle,{view});
     assert(!/<script\b[^>]*\bsrc=|<link\b[^>]*href="\//i.test(html));
-    const scripts=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter(m=>!m[1].includes('text/plain'));
+    const scripts=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter(m=>!m[1].includes('text/plain')&&!m[1].includes('application/json'));
     assert.equal(scripts.length,3);
     for(const [,attrs,source] of scripts){const result=spawnSync(process.execPath,['--check',...(attrs.includes('module')?['--input-type=module']:[])],{input:source,encoding:'utf8'});assert.equal(result.status,0,result.stderr);}
     assert(html.includes(`"view":"${view}"`));assert(html.includes('普通成员访问'));assert(html.includes('GNU LESSER GENERAL PUBLIC LICENSE'));assert(html.includes('Apache License'));

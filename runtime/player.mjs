@@ -75,6 +75,10 @@ export function pageBridge(config) {
       if (rect.width && rect.height) positions[annotation.id] = [(rect.x + rect.width * offset[0]) / config.width, (rect.y + rect.height * offset[1]) / config.height];
     }
     send('measure', {positions});
+    if (config.focusSelector) {
+      const target=query(config.focusSelector),rect=target?.getBoundingClientRect();
+      send('component-bounds',rect?{rect:[rect.x+window.scrollX,rect.y+window.scrollY,rect.width,rect.height]}:{missing:true});
+    }
   }
   window.addEventListener('message',event=>{
     if(event.source!==parent||event.data?.yuanxing!==config.token||event.data?.type!=='handoff-snapshot')return;
@@ -129,6 +133,7 @@ export function pageBridge(config) {
   }
   paint(); measure();
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measure).observe(document.body);
+  if (config.focusSelector && typeof MutationObserver !== 'undefined') new MutationObserver(measure).observe(document.body,{subtree:true,childList:true,attributes:true});
   window.addEventListener('load', measure, {once: true});
 }
 

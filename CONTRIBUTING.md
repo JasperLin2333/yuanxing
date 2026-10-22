@@ -17,6 +17,8 @@ npm run check
 npm run build:demo
 ```
 
+同一示例生成 `demo/review.html`、`demo/prototype.html` 与 `demo/document.html`。文档使用源页面和说明引用，兼容数据由导出器生成；不直接编辑导出副本。
+
 修改前读取当前文件，保留已有改动。按本次范围核对交互、资源路径、源与导出的一致性；只有取得对应证据才声明运行或验收通过。
 
 ## 渠道适配与发布

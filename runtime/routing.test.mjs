@@ -38,7 +38,7 @@ test('手调折点保留，刷新与撤销后仍能重算其他路径',()=>{
 test('单文件仅内嵌布线引擎并可独立执行，导出数据和路径与编辑端一致',async()=>{
   const model={version:1,title:'离线',entryModule:'flow',modules:[{id:'flow',title:'流程'}],nodes:[page('a',60,60),page('b',700,60)],edges:[{id:'ab',from:'a',to:'b'}],annotations:[]};
   const html=await standalone({model,resources:{},fragments:{},images:{}});assert.ok(!/<script[^>]+src=/.test(html));assert.ok(!html.includes("Eclipse Public License"));assert.match(html,/GNU LESSER GENERAL PUBLIC LICENSE/);
-  const scripts=[...html.split('<script type="module">')[0].matchAll(/<script(?![^>]*type="text\/plain")[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
+  const scripts=[...html.split('<script type="module">')[0].matchAll(/<script(?![^>]*type="(?:text\/plain|application\/json)")[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
   const context=vm.createContext({console,setTimeout,clearTimeout,URL,performance,document:{}});vm.runInContext('globalThis.window=globalThis;globalThis.self=globalThis;',context);for(const code of scripts)vm.runInContext(code,context);
   assert.ok(context.Avoid.Router);assert.equal(typeof context.AvoidRouting.computeRoutes,'function');assert.equal(context.ELK,undefined);assert.equal(context.YUANXING_BOOT.bundle.model.title,model.title);
   const module=html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];assert.ok(!/^import /m.test(module));
