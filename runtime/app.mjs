@@ -455,7 +455,7 @@ function startAnnotation(id=annotationTarget()){
   const active=mode==='annotate';linkCaptureTarget=null;mode=active?null:'annotate';renderOverlays();
 }
 function travel(edge){if(projectExtension?.travel?.(edge))return;const returnContext=clone(flowContext);flowContext=nextContext(flowContext,edge);openNode(edge.to,true,{returnContext});}
-function follow(edges){const available=eligibleEdges(edges,flowContext);if(!available.length){notice('请从对应流程入口进入后再继续。');return;}if(available.length===1){travel(available[0]);return;}const box=$('#branch-options');box.replaceChildren();for(const e of available){const b=document.createElement('button');b.textContent=e.condition||e.label;b.onclick=()=>{$('#branch-dialog').close();travel(e);};box.append(b);}$('#branch-dialog').showModal();}
+function follow(edges){const edge=eligibleEdges(edges,flowContext)[0];if(!edge){notice('请从对应流程入口进入后再继续。');return;}travel(edge);}
 function prepareNote(box,n){
   box.style.width=n.width+'px';box.style.minHeight=n.height+'px';
   for(const img of box.querySelectorAll('img'))if(!img.complete)img.addEventListener('load',()=>{if(box.isConnected&&current===n.id)sizeNote();},{once:true});
@@ -715,7 +715,7 @@ async function action(name){
     case 'annotate':startAnnotation();break;
     case 'image-preview-back':backFromImagePreview();break;
     case 'overview':current=null;selected=null;mode=null;renderAll();$('#canvas-viewport').focus({preventScroll:true});break;
-    case 'export-module':await exportFile('module');break;case 'export-all':await exportFile('all');break;case 'close-branch':$('#branch-dialog').close();break;
+    case 'export-module':await exportFile('module');break;case 'export-all':await exportFile('all');break;
   }
 }
 document.addEventListener('click',event=>{const target=event.target.closest('[data-action]');if(target&&!(readonly&&['image','note','annotate','canvas-menu','export-menu','undo','export-module','export-all'].includes(target.dataset.action)))action(target.dataset.action).catch(error=>notice(error.message));});
@@ -763,7 +763,7 @@ $('#canvas-viewport').onpointerdown=event=>{
 };
 $('#canvas-viewport').addEventListener('wheel',event=>{event.preventDefault();if(event.ctrlKey||event.metaKey)zoom(wheelZoomFactor(event.deltaY,zoomSensitivity,event.deltaMode),event);else{camera.x-=event.deltaX;camera.y-=event.deltaY;transform();}},{passive:false});
 $('#image-preview-dialog').addEventListener('cancel',event=>{event.preventDefault();backFromImagePreview();});
-document.addEventListener('keydown',event=>{if(devMode&&event.key==='Escape'){event.preventDefault();toggleDeveloperMode(false);return;}if(!event.defaultPrevented&&event.key==='Escape'&&!$('#branch-dialog').open){if($('#image-preview-dialog').open){event.preventDefault();backFromImagePreview();return;}if(experience){event.preventDefault();exitExperience();return;}}if(event.defaultPrevented||$('#image-replace-dialog').open)return;if(event.key==='Escape'){closeAnnotationEditor();closeMenus();cancelConnection?.();mode=null;linkCaptureTarget=null;renderOverlays();}if(event.target.closest('input,textarea,select,[contenteditable]'))return;
+document.addEventListener('keydown',event=>{if(devMode&&event.key==='Escape'){event.preventDefault();toggleDeveloperMode(false);return;}if(!event.defaultPrevented&&event.key==='Escape'){if($('#image-preview-dialog').open){event.preventDefault();backFromImagePreview();return;}if(experience){event.preventDefault();exitExperience();return;}}if(event.defaultPrevented||$('#image-replace-dialog').open)return;if(event.key==='Escape'){closeAnnotationEditor();closeMenus();cancelConnection?.();mode=null;linkCaptureTarget=null;renderOverlays();}if(event.target.closest('input,textarea,select,[contenteditable]'))return;
   if(event.code==='Space'&&!current&&!event.target.closest('button,summary')){event.preventDefault();spacePressed=true;return;}
   if(event.key==='Escape'&&!current){activeCanvasGesture?.();selectNodes([]);return;}
   if(!readonly&&!current&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();selectNodes(activeCanvasNodes().filter(n=>!linesHidden||!isBranch(n)).map(n=>n.id));return;}

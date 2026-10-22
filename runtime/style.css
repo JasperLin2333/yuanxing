@@ -289,7 +289,6 @@ dialog::backdrop{background:#14141455}
 dialog h2{margin:0 0 20px;font-size:14px;font-weight:600}
 #image-replace-description{margin:0;overflow-wrap:anywhere}
 dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
-#branch-options button{display:block;width:100%;margin:8px 0;border:1px solid var(--border);text-align:left;white-space:normal}
 .readonly #edit-tools,.readonly #export-menu,.readonly .editor-only{display:none!important}
 @media(max-width:1050px){
   .layout{--sidebar-width:200px;--inspector-width:264px}

@@ -115,7 +115,7 @@ npx skills add JasperLin2333/yuanxing --skill yuanxing
 
 画布上的布局、连线和批注可以继续编辑，局部改动保留已有整理；完整原型与导出使用同一份设计，讨论后的修改继续回到源项目。
 
-项目包含 [178 项自动化测试](test/)，覆盖连线与分叉、撤销、交互状态、多项目隔离、版本冲突和离线导出。日常操作细节见[工作台手册](references/workbench.md)。
+项目包含 [179 项自动化测试](test/)，覆盖连线与分叉、撤销、交互状态、多项目隔离、版本冲突和离线导出。日常操作细节见[工作台手册](references/workbench.md)。
 
 <details>
 <summary><strong>先在本地跑一个案例</strong></summary>

@@ -46,15 +46,19 @@ test('画布预览及以图片为产品入口仍能正常打开页面',()=>{
   const {state:s,$}=fixture();s.experience=false;s.openNode('first');assert.equal(s.current,'first');assert.equal(s.renders,1);assert.equal($('#image-preview-dialog').open,false);
   s.experience=true;s.openNode('second',true,{asPage:true});assert.equal(s.current,'second');assert.equal(s.renders,2);assert.equal($('#image-preview-dialog').open,false);
 });
-test('Esc 先返回图片，后退出完整原型；图片上的分支选择优先处理 Esc',()=>{
+test('Esc 先返回图片，后退出完整原型；取消预览事件保留返回行为',()=>{
   const {state:s,$,context,listeners}=fixture();
   const start=source.indexOf("$('#image-preview-dialog').addEventListener('cancel'"),end=source.indexOf("window.addEventListener('beforeunload'",start);assert(end>start);
   vm.runInContext(source.slice(start,end),context);
   const key=()=>({key:'Escape',defaultPrevented:false,target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;}});
   s.openNode('first',true);listeners.keydown(key());assert.equal($('#image-preview-dialog').open,false);assert.equal(s.exited,undefined);
   listeners.keydown(key());assert.equal(s.exited,true);s.exited=false;
-  s.openNode('first',true);$('#branch-dialog').open=true;
-  Object.assign(s,{readonly:true,closeMenus(){},cancelConnection:null,renderOverlays(){}});
-  const event=key();listeners.keydown(event);assert.equal(event.defaultPrevented,false);assert.equal($('#image-preview-dialog').open,true);assert.equal(s.exited,false);
-  $('#branch-dialog').open=false;listeners.cancel(event);assert.equal($('#image-preview-dialog').open,false);assert.equal(event.defaultPrevented,true);
+  s.openNode('first',true);
+  const event=key();listeners.cancel(event);assert.equal($('#image-preview-dialog').open,false);assert.equal(event.defaultPrevented,true);assert.equal(s.exited,false);
+});
+
+test('同一热点有多条路径时直接沿首条符合上下文的连线继续',()=>{
+  const {state:s,$}=fixture();
+  s.follow([{to:'other',when:{role:'member'}},{to:'first',when:{role:'admin'},setContext:{step:'first'}},{to:'second'}]);
+  assert.equal($('#image-preview-title').textContent,'first');assert.equal(s.flowContext.step,'first');assert.equal(s.current,'home');
 });
