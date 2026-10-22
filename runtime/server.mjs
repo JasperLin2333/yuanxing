@@ -7,6 +7,7 @@ import {execFile} from 'node:child_process';
 import {inlineHTML} from './resources.mjs';
 import {promisify} from 'node:util';
 import {compatibilityDataTag} from './compatibility.mjs';
+import {documentSourceBlocks,documentSourceKey,extractDocumentSource} from './document.mjs';
 import {clone,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,recycleNodes,removeNodes,mergeProject} from './core.mjs';
 const exec=promisify(execFile),tool=path.dirname(fileURLToPath(import.meta.url));
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -69,7 +70,17 @@ export async function createStore(root,{builder,validator,extension}={}){
   const renderInputs=model=>model.nodes.filter(n=>n.kind!=='note').map(n=>({id:n.id,path:n.path,render:n.render}));
   // 同一份构建输入同时用于失效判断和轻量资源版本，包含同目录辅助脚本及参考图片。
   async function buildInputs(model){return sha(JSON.stringify([renderInputs(model),await Promise.all([...(builder?[path.dirname(await safePath(root,builder))]:[]),...['components','modules','assets'].map(dir=>path.join(artifact,dir)),...(projectExtension?[projectExtension.root]:[])].map(fingerprint))]));}
-  async function sourceVersion(model){return sha(JSON.stringify([await fingerprint(artifact),await buildInputs(model)]));}
+  async function documentInputs(model){
+    const files=new Set(),sources=new Map();
+    for(const block of documentSourceBlocks(model)){
+      const file=await safePath(root,block.path);files.add(file);
+      if(!sources.has(block.path))sources.set(block.path,await fs.readFile(file,'utf8'));
+      const text=extractDocumentSource(sources.get(block.path),block.section,block.omitHeading);
+      for(const match of text.matchAll(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g))if(match[1])files.add(await safePath(root,path.posix.normalize(path.posix.join(path.posix.dirname(block.path),match[1]))));
+    }
+    return Promise.all([...files].map(fingerprint));
+  }
+  async function sourceVersion(model){return sha(JSON.stringify([await fingerprint(artifact),await buildInputs(model),await documentInputs(model)]));}
   async function runtimeVersion(){return sha(JSON.stringify(await Promise.all([tool,...(projectExtension?[projectExtension.root]:[])].map(fingerprint))));}
   async function status(){const {model,revision}=await readModel();return {revision,sourceVersion:await sourceVersion(model),runtimeVersion:await runtimeVersion()};}
   async function buildIfNeeded(model){
@@ -79,12 +90,25 @@ export async function createStore(root,{builder,validator,extension}={}){
       await exec('python3',[script],{cwd:root,maxBuffer:2*1024*1024});buildSig=sig;
     })();building=job;try{await job;}finally{if(building===job)building=null;}
   }
-  async function load(){const {model,revision}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));await buildIfNeeded(model);const resources={},fragments={},images={};
+  async function load(){const {model,revision}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));await buildIfNeeded(model);const resources={},fragments={},images={},documentSources={};
     async function readImage(relative){const file=await safePath(artifact,relative),mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}[path.extname(file).toLowerCase()];if(!mime)throw new Error('图片格式不支持');return `data:${mime};base64,${(await fs.readFile(file)).toString('base64')}`;}
     async function addFragment(key,trail=[]){if(trail.includes(key))throw new Error('组件循环引用');if(fragments[key]!==undefined)return;const file=await safePath(artifact,key),input=await fs.readFile(file,'utf8'),text=projectExtension?.declarative?freeze(input):await inlineHTML(input,file,artifact);fragments[key]=text;for(const match of text.matchAll(/<!--\s*include:([^>]+?)\s*-->/g))await addFragment(match[1],[...trail,key]);}
     for(const n of model.nodes){if(n.kind==='note')continue;const file=await safePath(artifact,n.path);if(n.kind==='image'){resources[n.id]=await readImage(n.path);}else{const input=await fs.readFile(file,'utf8');resources[n.id]=projectExtension?.declarative?freeze(input):await inlineHTML(input,file,artifact);for(const match of resources[n.id].matchAll(/<!--\s*include:([^>]+?)\s*-->/g))await addFragment(match[1]);assertOffline(expandHTML(resources[n.id],fragments),n.title,projectExtension?.declarative);}}
     for(const relative of descriptionImagePaths(model)){try{images[relative]=await readImage(relative);}catch(error){throw new Error(`说明图片无法读取：${relative}（${error.code==='ENOENT'?'文件不存在':error.message}）`);}}
-    return {model,revision,runtimeVersion:await runtimeVersion(),resources,fragments,images,sourcesSignature:sha(JSON.stringify(resources)+JSON.stringify(fragments)+JSON.stringify(images)),sourceVersion:await sourceVersion(model)};
+    const sourceFiles=new Map();
+    for(const block of documentSourceBlocks(model)){
+      if(!sourceFiles.has(block.path))sourceFiles.set(block.path,await fs.readFile(await safePath(root,block.path),'utf8'));
+      let text=extractDocumentSource(sourceFiles.get(block.path),block.section,block.omitHeading);
+      const replacements=new Map();
+      for(const match of text.matchAll(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g))if(match[1]){
+        const relative=path.posix.normalize(path.posix.join(path.posix.dirname(block.path),match[1]));
+        const file=await safePath(root,relative),mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}[path.extname(file).toLowerCase()];
+        if(!mime)throw new Error('需求正文图片格式不支持');
+        const key='assets/source-'+sha(relative).slice(0,20)+path.extname(file).toLowerCase();images[key]=`data:${mime};base64,${(await fs.readFile(file)).toString('base64')}`;replacements.set(match[0],match[0].replace('('+match[1]+')','('+key+')'));
+      }
+      text=text.replace(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g,match=>replacements.get(match)||match);documentSources[documentSourceKey(block)]=text;
+    }
+    return {model,revision,runtimeVersion:await runtimeVersion(),resources,fragments,images,documentSources,sourcesSignature:sha(JSON.stringify(resources)+JSON.stringify(fragments)+JSON.stringify(images)+JSON.stringify(documentSources)),sourceVersion:await sourceVersion(model)};
   }
   async function transaction(operation){const previous=queue;let release;queue=new Promise(resolve=>release=resolve);await previous;try{return await operation();}finally{release();}}
   function assertRevision(actual,revision,required=false){if((required||revision!==undefined)&&actual.revision!==revision){const error=new Error('项目已被外部修改');error.status=409;throw error;}}
@@ -131,6 +155,7 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const errors=exportIssues(model);if(errors.length)throw new Error(errors.join('；'));
   const resources=Object.fromEntries(model.nodes.filter(n=>bundle.resources[n.id]).map(n=>[n.id,bundle.resources[n.id]]));
   const images={};for(const relative of descriptionImagePaths(model)){if(!bundle.images?.[relative])throw new Error(`说明图片未载入：${relative}`);images[relative]=bundle.images[relative];}
+  const documentSources={};for(const block of documentSourceBlocks(model)){const key=documentSourceKey(block),text=bundle.documentSources?.[key];if(text===undefined)throw new Error('需求正文未载入：'+block.path);documentSources[key]=text;for(const match of text.matchAll(/!\[[^\]\n]*\]\((assets\/[^)\n]+)\)/g)){if(!bundle.images?.[match[1]])throw new Error('需求正文图片未载入');images[match[1]]=bundle.images[match[1]];}}
   for(const n of model.nodes.filter(n=>n.kind==='html'))assertOffline(expandHTML(resources[n.id],bundle.fragments),n.title);
   const fragments={},add=key=>{if(fragments[key]!==undefined)return;fragments[key]=bundle.fragments[key];for(const m of fragments[key].matchAll(/<!--\s*include:([^>]+?)\s*-->/g))add(m[1]);};for(const text of Object.values(resources))for(const m of text.matchAll(/<!--\s*include:([^>]+?)\s*-->/g))add(m[1]);
   const strip=text=>text.replace(/^import[^\n]+\n/gm,''),inline=text=>text.replace(/<\/script/gi,'<\\/script');
@@ -138,9 +163,9 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const extensionCode=projectExtension?(await Promise.all(projectExtension.files.map(async file=>fs.readFile(await safePath(projectExtension.root,file),'utf8')))).map(strip).join('\n'):strip(await fs.readFile(path.join(tool,'extension.mjs'),'utf8'));
   const vendors=(await Promise.all(['libavoid.min.js','libavoid-routing.js'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n');
   const licenses=(await Promise.all(['LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE','THIRD-PARTY-README.md'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n\n');
-  const data=JSON.stringify({readonly:true,view,flow,bundle:{model,resources,fragments,images}}).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+  const data=JSON.stringify({readonly:true,view,flow,bundle:{model,resources,fragments,images,documentSources}}).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
   let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([routing,documentCode,core,player,documentPlayer,handoff,library,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
-  html=html.replace('</head>',()=>compatibilityDataTag({model,resources,fragments,images})+'</head>');
+  html=html.replace('</head>',()=>compatibilityDataTag({model,resources,fragments,images,documentSources})+'</head>');
   return html;
 }
 async function body(req){const parts=[];let bytes=0;for await(const part of req){const buffer=Buffer.isBuffer(part)?part:Buffer.from(part);bytes+=buffer.length;if(bytes>64*1024*1024)throw new Error('图片或数据过大');parts.push(buffer);}return JSON.parse(Buffer.concat(parts,bytes).toString('utf8')||'{}');}

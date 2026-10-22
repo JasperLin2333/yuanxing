@@ -6,6 +6,7 @@ import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {copySkill} from '../scripts/distribution.mjs';
+import {documentSourceKey} from '../runtime/document.mjs';
 const source=fileURLToPath(new URL('../',import.meta.url));
 const sourceVersion=JSON.parse(await fs.readFile(path.join(source,'package.json'),'utf8')).version;
 for(const target of ['generic','skillhub','workbuddy'])test(`${target} 发布包不含开发材料，脱离源目录仍能创建、检查和离线导出`,async t=>{
@@ -20,5 +21,6 @@ for(const target of ['generic','skillhub','workbuddy'])test(`${target} 发布包
     const result=spawnSync(process.execPath,[path.join(skill,'scripts/yuanxing.mjs'),...args],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);
   }
   const html=await fs.readFile(path.join(project,'dist/prototype.html'),'utf8');assert(html.includes('GNU LESSER GENERAL PUBLIC LICENSE'));assert(html.includes('Apache License'));assert(!html.includes('<script type="module" src="/app.mjs"'));
-  const documentHtml=await fs.readFile(path.join(project,'dist/document.html'),'utf8');assert(documentHtml.includes('"view":"document"'));const data=JSON.parse(documentHtml.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1]);assert(data.yuanxing.document.blocks.some(block=>block.type==='table'));
+  const documentHtml=await fs.readFile(path.join(project,'dist/document.html'),'utf8');assert(documentHtml.includes('"view":"document"'));const data=JSON.parse(documentHtml.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1]);
+  const referenced=data.yuanxing.document.blocks.filter(block=>block.type==='source');assert(referenced.length>0);assert.deepEqual(Object.keys(data.yuanxing.documentSources).sort(),[...new Set(referenced.map(documentSourceKey))].sort());for(const block of referenced){assert((await fs.stat(path.join(project,block.path))).isFile());assert(data.yuanxing.documentSources[documentSourceKey(block)].trim());}
 });

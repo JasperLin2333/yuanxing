@@ -1,4 +1,4 @@
-// 需求文档只保存编排与正文；页面和页面说明继续引用项目源。
+// 需求文档保存编排，页面、详细说明和已有 Markdown 正文保持各自唯一来源。
 const docCopy = value => JSON.parse(JSON.stringify(value));
 const docId = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
 export function walkDocument(blocks, visit) {
@@ -16,13 +16,32 @@ export function defaultDocument(model) {
     const nodes = model.nodes.filter(n => n.module === module.id && n.overview !== false && n.canvas !== false && n.presentation !== 'branch');
     if (!nodes.length) continue;
     if (model.modules.length > 1) blocks.push({id:`doc-heading:${module.id}`,type:'text',format:'heading1',text:module.title});
-    const rows = nodes.map(n => ({id:`doc-row:${n.id}`,cells:[
-      {id:`doc-page-cell:${n.id}`,blocks:[{id:`doc-page:${n.id}`,type:n.kind === 'note' ? 'description' : 'prototype',node:n.id}]},
-      {id:`doc-detail-cell:${n.id}`,blocks:n.kind === 'note' ? [] : [{id:`doc-detail:${n.id}`,type:'description',node:n.id}]}
-    ]}));
-    blocks.push({id:`doc-table:${module.id}`,type:'table',widths:[56,44],rows});
+    for (const node of nodes) {
+      blocks.push({id:`doc-title:${node.id}`,type:'text',format:'heading2',text:node.title});
+      if (node.kind !== 'note') blocks.push({id:`doc-page:${node.id}`,type:'prototype',node:node.id});
+      blocks.push({id:`doc-detail:${node.id}`,type:'description',node:node.id});
+    }
   }
   return {version:1,blocks};
+}
+export function documentSourceBlocks(model) {
+  const blocks=[];walkDocument(model.document?.blocks,block=>{if(block.type==='source')blocks.push(block);});return blocks;
+}
+export const documentSourceKey = block => JSON.stringify([block.path,block.section||'',!!block.omitHeading]);
+// 按完整标题定位，包含子章节；代码块中的 # 不参与分节。
+export function extractDocumentSource(text,section,omitHeading=false) {
+  if (!section) return text;
+  const lines=text.split('\n'),headings=[];let fence;
+  for(let i=0;i<lines.length;i++){
+    const marker=lines[i].match(/^\s{0,3}(`{3,}|~{3,})/);
+    if(marker){if(!fence)fence=marker[1][0];else if(fence===marker[1][0])fence=null;continue;}
+    const heading=!fence&&lines[i].match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if(heading)headings.push({line:i,level:heading[1].length,title:heading[2]});
+  }
+  const matches=headings.filter(h=>h.title===section);
+  if(matches.length!==1)throw new Error(matches.length?'需求正文标题重复：'+section:'需求正文标题不存在：'+section);
+  const start=matches[0],end=headings.find(h=>h.line>start.line&&h.level<=start.level)?.line??lines.length;
+  return lines.slice(start.line+(omitHeading?1:0),end).join('\n').trim();
 }
 export function ensureDocument(model) { return model.document ||= defaultDocument(model); }
 export function findDocumentBlock(model, id) {
@@ -75,15 +94,16 @@ export function newDocumentBlock(type, node) {
   const text = () => ({id:docId('text'),type:'text',text:''});
   if (type === 'columns') return {id:docId('columns'),type,columns:[{id:docId('column'),width:50,blocks:[text()]},{id:docId('column'),width:50,blocks:[text()]}]};
   if (type === 'table') return {id:docId('table'),type,widths:[50,50],rows:Array.from({length:2},() => ({id:docId('row'),cells:Array.from({length:2},() => ({id:docId('cell'),blocks:[text()]}))}))};
-  if (type === 'prototype' || type === 'component') return {id:docId('prototype'),type:'prototype',...(node ? {node} : {}),...(type === 'component' ? {selector:'[data-ec-component]'} : {})};
+  if (type === 'prototype') return {id:docId('prototype'),type:'prototype',...(node ? {node} : {})};
   return {id:docId('text'),type:'text',text:'',...(type === 'heading' ? {format:'heading1'} : {})};
 }
 export function pruneDocument(model) {
   if (!model.document) return;
   const nodes = new Set(model.nodes.map(n => n.id)), edges = new Set(model.edges.map(e => e.id));
   const prune = owner => {
-    owner.blocks = owner.blocks.filter(block => !['prototype','description'].includes(block.type) || (block.edge ? edges.has(block.edge) : nodes.has(block.node)));
+    owner.blocks = owner.blocks.filter(block => (!block.nodes?.length||block.nodes.some(id=>nodes.has(id)))&&(!['prototype','description'].includes(block.type) || (block.rule ? typeof model.rules?.[block.rule]==='string' : block.edge ? edges.has(block.edge) : nodes.has(block.node))));
     for (const block of owner.blocks) {
+      if(block.nodes)block.nodes=block.nodes.filter(id=>nodes.has(id));
       if (block.type === 'columns') block.columns.forEach(prune);
       if (block.type === 'table') block.rows.forEach(row => row.cells.forEach(prune));
     }
@@ -109,9 +129,13 @@ export function validateDocument(model) {
       if (block.type === 'text') {
         if (typeof block.text !== 'string' || block.format !== undefined && !['paragraph','heading1','heading2','heading3','quote'].includes(block.format)) errors.push('文档正文格式不正确');
       } else if (block.type === 'prototype' || block.type === 'description') {
-        if (block.type === 'prototype' ? !nodes.has(block.node) || nodes.get(block.node).kind === 'note' : block.edge ? !edges.has(block.edge) : !nodes.has(block.node)) errors.push('文档引用的页面或操作不存在');
+        if (block.type === 'prototype' ? !nodes.has(block.node) || nodes.get(block.node).kind === 'note' : block.rule ? typeof model.rules?.[block.rule]!=='string' : block.edge ? !edges.has(block.edge) : !nodes.has(block.node)) errors.push('文档引用的页面或操作不存在');
         if (block.selector !== undefined && (typeof block.selector !== 'string' || !block.selector.trim() || block.selector.length > 1000)) errors.push('文档组件选择器不正确');
         if (block.height !== undefined && (!Number.isFinite(block.height) || block.height < 120 || block.height > 20000)) errors.push('文档原型高度不正确');
+      } else if (block.type === 'source') {
+        if(typeof block.path!=='string'||! /^(?!\/|\w+:)[^\\\u0000-\u001f]+\.md$/i.test(block.path)||block.path.split('/').some(v=>!v||v==='.'||v==='..'))errors.push('需求正文路径不正确');
+        if(block.section!==undefined&&(typeof block.section!=='string'||!block.section.trim()))errors.push('需求正文标题不正确');
+        if(block.omitHeading!==undefined&&typeof block.omitHeading!=='boolean')errors.push('需求正文标题设置不正确');
       } else if (block.type === 'image') {
         if (typeof block.path !== 'string' || !/^assets\/[^?#\\\u0000-\u001f]+\.(png|jpe?g|webp)$/i.test(block.path) || block.path.split('/').some(v => !v || v === '.' || v === '..')) errors.push('文档图片路径不正确');
       } else if (block.type === 'columns') {
@@ -123,6 +147,7 @@ export function validateDocument(model) {
         if (block.widths !== undefined && (!Array.isArray(block.widths) || block.widths.length !== count || block.widths.some(v => !Number.isFinite(v) || v <= 0))) errors.push('文档表格列宽不正确');
         for (const row of block.rows) { claim(row); if (!Array.isArray(row?.cells) || row.cells.length !== count) { errors.push('文档表格列数不一致'); continue; } for (const cell of row.cells) { claim(cell); children(cell,depth+1); } }
       } else errors.push('文档内容类型不正确');
+      if(block.nodes!==undefined&&(!Array.isArray(block.nodes)||block.nodes.some(id=>!nodes.has(id))))errors.push('需求正文关联页面不存在');
     }
   };
   if (model.document?.version !== 1) return ['文档数据版本不正确'];
@@ -160,7 +185,7 @@ export function createDocumentView(host) {
   root.addEventListener('drop',event=>{if(!event.dataTransfer.files.length)return;event.preventDefault();event.stopPropagation();if(!host.readonly)appendImages(event.dataTransfer.files,event.target.closest('[data-doc-container]')?.dataset.docContainer||'@document');});
   function addControl(containerId,beforeId) {
     const select=el('select','doc-insert');select.setAttribute('aria-label','插入文档内容');
-    for(const [value,label] of [['','＋ 插入'],['text','正文'],['heading','标题'],['columns','左右分栏'],['table','表格'],['prototype','原型页面'],['component','交互组件'],['image','图片']]){const option=el('option','',label);option.value=value;select.append(option);}
+    for(const [value,label] of [['','＋ 插入'],['text','正文'],['heading','标题'],['columns','分栏'],['table','表格'],['image','图片']]){const option=el('option','',label);option.value=value;select.append(option);}
     select.onchange=()=>{if(select.value)insert(select.value,containerId,beforeId);select.value='';};return select;
   }
   function textEditor(value,onchange,format='paragraph',placeholder='输入需求说明…') {
@@ -215,21 +240,20 @@ export function createDocumentView(host) {
       if(!host.readonly){const format=el('select','doc-format');format.setAttribute('aria-label','正文样式');for(const [value,label] of [['paragraph','正文'],['heading1','一级标题'],['heading2','二级标题'],['heading3','三级标题'],['quote','引用']]){const option=el('option','',label);option.value=value;format.append(option);}format.value=block.format||'paragraph';format.onchange=()=>changed(model=>findDocumentBlock(model,block.id).format=format.value);article.append(format);}
       article.append(textEditor(block.text,value=>fieldChanged(model=>findDocumentBlock(model,block.id).text=value),block.format));
     } else if(block.type==='description') {
+      if(block.rule){const body=el('div','doc-text markdown');body.innerHTML=host.markdown(host.model().rules[block.rule]);article.append(body);return article;}
       const target=block.edge?host.model().edges.find(e=>e.id===block.edge):host.model().nodes.find(n=>n.id===block.node);
       if(target)article.append(textEditor(host.explanation(target),value=>fieldChanged(model=>{const owner=block.edge?model.edges.find(e=>e.id===block.edge):model.nodes.find(n=>n.id===block.node);if(owner)host.writeExplanation(owner,value);}), 'paragraph','输入详细需求说明…'));
+    } else if(block.type==='source') {
+      const body=el('div','doc-text markdown doc-source');body.innerHTML=host.markdown(host.bundle().documentSources?.[documentSourceKey(block)]||'');article.append(body);
     } else if(block.type==='image') {
       const image=el('img','doc-image');image.alt=block.alt||'';image.src=host.bundle().images?.[block.path]||'';article.append(image);
     } else if(block.type==='prototype') {
       const bar=el('div','doc-prototype-bar');
-      if(!host.readonly){const select=el('select');select.setAttribute('aria-label','引用原型页面');for(const node of protoNodes()){const option=el('option','',node.title);option.value=node.id;select.append(option);}select.value=block.node;select.onchange=()=>changed(model=>findDocumentBlock(model,block.id).node=select.value);bar.append(select);
-        const component=button(block.selector?'整个页面':'局部组件',()=>changed(model=>{const target=findDocumentBlock(model,block.id);if(target.selector)delete target.selector;else target.selector='[data-ec-component]';}));bar.append(component);
-        if(block.selector){const selector=el('input');selector.value=block.selector;selector.placeholder='组件 CSS 选择器';selector.setAttribute('aria-label','组件 CSS 选择器');selector.onchange=()=>changed(model=>findDocumentBlock(model,block.id).selector=selector.value.trim()||'[data-ec-component]');bar.append(selector);}
-        const height=el('input','doc-height');height.type='number';height.min='120';height.max='20000';height.step='40';height.value=block.height||480;height.setAttribute('aria-label','原型显示高度');height.title='原型显示高度（px）';height.onchange=()=>{const value=Number(height.value);if(value>=120&&value<=20000)changed(model=>findDocumentBlock(model,block.id).height=value);};bar.append(height);
-      }else bar.append(el('span','',titleOf(block)));
+      bar.append(el('span','',block.title||titleOf(block)));
       article.append(bar);
       const node=host.model().nodes.find(n=>n.id===block.node),key=JSON.stringify([block.node,block.selector,block.height,host.bundle().sourcesSignature,host.bundle().resources?.[block.node],host.model().edges.filter(e=>e.from===block.node)]);
       let cached=cache.get(block.id);
-      if(!cached||cached.key!==key){cached?.dispose?.();const viewport=el('div','doc-prototype-viewport');viewport.style.height=(block.height||480)+'px';cached={key,viewport,...(node?host.mountPrototype(node,viewport,block):{})};cache.set(block.id,cached);}
+      if(!cached||cached.key!==key){cached?.dispose?.();const viewport=el('div','doc-prototype-viewport');cached={key,viewport,...(node?host.mountPrototype(node,viewport,block):{})};cache.set(block.id,cached);}
       article.append(cached.viewport);
     } else if(block.type==='columns') {
       article.append(rowGrid(block,block.columns,block.columns.map(c=>c.width||100/block.columns.length),depth));

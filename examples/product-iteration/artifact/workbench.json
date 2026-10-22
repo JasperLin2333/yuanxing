@@ -24,7 +24,8 @@
       "height": 800,
       "x": 60,
       "y": 60,
-      "description": "复用已有产品截图。本次仅增加分配入口及后续流程。"
+      "description": "复用已有产品截图。本次仅增加分配入口及后续流程。",
+      "summary": "复用已有产品截图。本次仅增加分配入口及后续流程。"
     },
     {
       "id": "assign",
@@ -36,7 +37,8 @@
       "height": 800,
       "x": 560,
       "y": 60,
-      "description": "管理员选择负责成员后确认。"
+      "description": "管理员选择负责成员后确认。",
+      "summary": "管理员选择负责成员后确认。"
     },
     {
       "id": "success",
@@ -48,7 +50,8 @@
       "height": 800,
       "x": 1060,
       "y": 60,
-      "description": "展示本次选择的负责成员。"
+      "description": "展示本次选择的负责成员。",
+      "summary": "展示本次选择的负责成员。"
     },
     {
       "id": "permission",
@@ -60,7 +63,8 @@
       "height": 800,
       "x": 560,
       "y": 470,
-      "description": "普通成员进入同一入口时展示权限边界。"
+      "description": "普通成员进入同一入口时展示权限边界。",
+      "summary": "普通成员进入同一入口时展示权限边界。"
     }
   ],
   "edges": [
@@ -166,108 +170,68 @@
   ],
   "document": {
     "version": 1,
-    "title": "客户分配 · 需求说明",
+    "title": "客户分配 · 需求文档",
     "blocks": [
       {
-        "id": "document-goal-title",
+        "id": "document-goals",
+        "type": "source",
+        "path": "需求.md",
+        "section": "1 需求目标"
+      },
+      {
+        "id": "document-feature-list",
+        "type": "source",
+        "path": "需求.md",
+        "section": "2 功能清单"
+      },
+      {
+        "id": "document-details",
         "type": "text",
         "format": "heading1",
-        "text": "本次变化"
+        "text": "3 需求详情"
       },
       {
-        "id": "document-goal",
+        "id": "doc-list-title",
         "type": "text",
-        "text": "在已有客户列表中增加分配入口。管理员可以选择负责成员并确认；普通成员查看对应的权限提示。"
+        "format": "heading2",
+        "text": "3.1 从客户列表发起分配"
       },
       {
-        "id": "document-flow",
-        "type": "table",
-        "widths": [
-          57,
-          43
+        "id": "doc-list-page",
+        "type": "prototype",
+        "node": "list"
+      },
+      {
+        "id": "doc-list-requirement",
+        "type": "source",
+        "path": "需求.md",
+        "section": "3.1 从客户列表发起分配",
+        "nodes": [
+          "list",
+          "permission"
         ],
-        "rows": [
-          {
-            "id": "row-list",
-            "cells": [
-              {
-                "id": "cell-list-page",
-                "blocks": [
-                  {
-                    "id": "doc-list-page",
-                    "type": "prototype",
-                    "node": "list",
-                    "height": 440
-                  }
-                ]
-              },
-              {
-                "id": "cell-list-rules",
-                "blocks": [
-                  {
-                    "id": "doc-list-title",
-                    "type": "text",
-                    "format": "heading2",
-                    "text": "客户列表"
-                  },
-                  {
-                    "id": "doc-list-description",
-                    "type": "description",
-                    "node": "list"
-                  },
-                  {
-                    "id": "doc-list-extra",
-                    "type": "text",
-                    "text": "- 管理员进入分配表单。\n- 普通成员从同一入口查看权限提示。"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "id": "row-assign",
-            "cells": [
-              {
-                "id": "cell-assign-page",
-                "blocks": [
-                  {
-                    "id": "doc-assign-page",
-                    "type": "prototype",
-                    "node": "assign",
-                    "height": 420
-                  }
-                ]
-              },
-              {
-                "id": "cell-assign-rules",
-                "blocks": [
-                  {
-                    "id": "doc-assign-title",
-                    "type": "text",
-                    "format": "heading2",
-                    "text": "选择负责成员"
-                  },
-                  {
-                    "id": "doc-assign-description",
-                    "type": "description",
-                    "node": "assign"
-                  },
-                  {
-                    "id": "doc-assign-extra",
-                    "type": "text",
-                    "text": "1. 选择一位负责成员。\n2. 确认后进入完成页，展示所选成员。\n3. 取消后返回客户列表。"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "omitHeading": true
       },
       {
-        "id": "document-component-title",
+        "id": "doc-assign-title",
         "type": "text",
-        "format": "heading1",
-        "text": "成员选择组件"
+        "format": "heading2",
+        "text": "3.2 选择负责成员"
+      },
+      {
+        "id": "doc-assign-page",
+        "type": "prototype",
+        "node": "assign"
+      },
+      {
+        "id": "doc-assign-requirement",
+        "type": "source",
+        "path": "需求.md",
+        "section": "3.2 选择负责成员",
+        "nodes": [
+          "assign"
+        ],
+        "omitHeading": true
       },
       {
         "id": "document-component-columns",
@@ -282,7 +246,7 @@
                 "type": "prototype",
                 "node": "assign",
                 "selector": "#assignee",
-                "height": 200
+                "title": "负责成员"
               }
             ]
           },
@@ -293,7 +257,7 @@
               {
                 "id": "doc-member-component-text",
                 "type": "text",
-                "text": "选择器可以在文档中直接操作。组件与完整表单引用同一份页面，页面内的输入与校验继续保留。"
+                "text": "成员选择\n\n从下拉列表选择本次负责成员；完整表单同时展示客户信息与确认操作。"
               }
             ]
           }
@@ -302,37 +266,23 @@
       {
         "id": "document-result-title",
         "type": "text",
-        "format": "heading1",
-        "text": "操作结果"
+        "format": "heading2",
+        "text": "3.3 查看分配结果"
       },
       {
-        "id": "document-result-columns",
-        "type": "columns",
-        "columns": [
-          {
-            "id": "result-preview-column",
-            "width": 56,
-            "blocks": [
-              {
-                "id": "doc-result-page",
-                "type": "prototype",
-                "node": "success",
-                "height": 300
-              }
-            ]
-          },
-          {
-            "id": "result-description-column",
-            "width": 44,
-            "blocks": [
-              {
-                "id": "doc-result-description",
-                "type": "description",
-                "node": "success"
-              }
-            ]
-          }
-        ]
+        "id": "doc-result-page",
+        "type": "prototype",
+        "node": "success"
+      },
+      {
+        "id": "doc-result-requirement",
+        "type": "source",
+        "path": "需求.md",
+        "section": "3.3 查看分配结果",
+        "nodes": [
+          "success"
+        ],
+        "omitHeading": true
       }
     ]
   }

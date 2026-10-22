@@ -1,6 +1,6 @@
 import {handoffAncestors,handoffClean,collectHandoff,handoffDocument,handoffPrompt,createDOMPicker} from './handoff.mjs';
 import {clone,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
-import {connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
+import {requirementText,canvasExplanation,writeCanvasExplanation,connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
 import {createLibrary,libraryStyles,reconcileCanvasCards} from './library.mjs';
 import {prototypeDocument,thumbnailHTML,flowEntries,cleanContext,createPreviewQueue,bindNativeDocument} from './player.mjs';
 import {createProjectExtension} from './extension.mjs';
@@ -571,15 +571,16 @@ function capturePoint(event){
   const end=e=>{cover.removeEventListener('pointermove',move);cover.removeEventListener('pointerup',end);box.remove();const p=[Math.min(1,Math.max(0,(e.clientX-r.x)/r.width)),Math.min(1,Math.max(0,(e.clientY-r.y)/r.height))],rect=[Math.min(start[0],p[0]),Math.min(start[1],p[1]),Math.abs(p[0]-start[0]),Math.abs(p[1]-start[1])];mode=null;renderOverlays();if(rect[2]<.005||rect[3]<.005){notice('请拖出按钮或交互区域。');return;}const id=linkCaptureTarget,n=node(current),anchor={rect};linkCaptureTarget=null;if(!model.edges.some(v=>v.id===id))return;if(n.kind==='image')anchor.imagePath=n.path;edit(m=>{const owner=m.edges.find(v=>v.id===id);delete owner.selector;delete owner.imagePath;delete owner.trigger;Object.assign(owner,anchor);selected={type:'edge',id};},false);if(n.kind==='html'&&frames[current])measure(frames[current],n);renderOverlays();renderInspector();};cover.addEventListener('pointermove',move);cover.addEventListener('pointerup',end);
 }
 function field(label,value,oninput,area=false){const box=document.createElement('label');box.textContent=label;const input=document.createElement(area?'textarea':'input');input.value=value||'';if(area)input.rows=6;input.oninput=()=>oninput(input.value);input.onblur=()=>inputGroup=null;box.append(input);return box;}
-function explanationText(owner){const own=String(owner.description||'').trim(),rule=String(model.rules?.[owner.rule]||'').trim();return !rule||own===rule||own.includes(rule)?own:[own,rule].filter(Boolean).join('\n\n');}
+function explanationText(owner){return requirementText(model,owner);}
+function canvasText(owner){return canvasExplanation(model,owner);}
 function writeExplanation(owner,text){owner.description=text;delete owner.rule;}
 function updateNote(n){if(n.kind!=='note')return;const thumb=document.querySelector(`.node[data-id="${n.id}"] .note-preview`);if(thumb){thumb.innerHTML=richText(n.description);fitNoteThumbnail(thumb,n);}const page=$('#page-stage .note-preview');if(current===n.id&&page){page.innerHTML=richText(n.description);prepareNote(page,n);}}
 function descriptionField(n){
   const box=document.createElement('div');box.className='description-field';
-  const label=document.createElement('span');label.className='field-label';label.textContent='说明正文';box.append(label);
-  const editor=document.createElement('div');editor.className='rich-editor markdown';editor.contentEditable='true';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','页面说明');editor.setAttribute('aria-multiline','true');editor.dataset.placeholder='输入说明';editor.innerHTML=richText(explanationText(n));
-  editor.oninput=()=>{const target=node(n.id);if(!target)return;editField(()=>writeExplanation(target,readDescription(editor)));updateNote(target);};
-  editor.onblur=()=>{inputGroup=null;if(!editor.dataset.uploading){const target=node(n.id);editor.innerHTML=target?richText(explanationText(target)):'';}};
+  const label=document.createElement('span');label.className='field-label';label.textContent=n.kind==='note'?'说明正文':'核心说明';box.append(label);
+  const editor=document.createElement('div');editor.className='rich-editor markdown';editor.contentEditable='true';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','页面说明');editor.setAttribute('aria-multiline','true');editor.dataset.placeholder='输入说明';editor.innerHTML=richText(canvasText(n));
+  editor.oninput=()=>{const target=node(n.id);if(!target)return;editField(()=>writeCanvasExplanation(target,readDescription(editor)));updateNote(target);};
+  editor.onblur=()=>{inputGroup=null;if(!editor.dataset.uploading){const target=node(n.id);editor.innerHTML=target?richText(canvasText(target)):'';}};
   editor.onpaste=event=>{event.preventDefault();event.stopPropagation();if(editor.dataset.uploading)return;const images=clipboardImages(event);if(images.length){pasteDescriptionImages(images,n.id,editor);return;}const range=editorRange(editor);range.deleteContents();const text=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(text);range.setStartAfter(text);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);editor.oninput();};
   box.append(editor);return box;
 }
@@ -596,8 +597,8 @@ function renderInspector(){
   const edgeId=selected.type==='edge'?selected.id:annotation?.edge;
   if(edgeId){
     const e=model.edges.find(e=>e.id===edgeId);if(!e)return;h.textContent='连线说明';pane.insertAdjacentHTML('beforeend',`<p class="edge-summary">${esc(node(e.from)?.title)} <span aria-hidden="true">→</span> ${esc(node(e.to)?.title)}</p>`);
-    if(readonly)pane.insertAdjacentHTML('beforeend',`<p>${esc(e.condition||e.label)}</p><div class="markdown">${richText(explanationText(e))}</div>`);
-    else{const branch=node(e.to);pane.append(field('操作名称',isBranch(branch)?branch.title:e.condition||e.label,value=>{editField(()=>{if(isBranch(branch))branch.title=value;else{e.label=value;if(e.condition!==undefined)e.condition=value;}});drawLines();}));pane.append(field('说明正文',explanationText(e),value=>editField(()=>writeExplanation(e,value)),true));
+    if(readonly)pane.insertAdjacentHTML('beforeend',`<p>${esc(e.condition||e.label)}</p><div class="markdown">${richText(canvasText(e))}</div>`);
+    else{const branch=node(e.to);pane.append(field('操作名称',isBranch(branch)?branch.title:e.condition||e.label,value=>{editField(()=>{if(isBranch(branch))branch.title=value;else{e.label=value;if(e.condition!==undefined)e.condition=value;}});drawLines();}));pane.append(field('说明正文',canvasText(e),value=>editField(()=>writeCanvasExplanation(e,value)),true));
 
 
       if(projectExtension?.bindHotspots!==false&&!e.diagram&&!isBranch(node(e.from))){const bind=document.createElement('button');bind.textContent=e.selector||e.rect?'重新绑定点击区域':'绑定点击区域';bind.onclick=()=>{openNode(e.from);selected={type:'edge',id:e.id};linkCaptureTarget=e.id;mode='link';renderOverlays();renderInspector();};pane.append(bind);}
@@ -606,9 +607,9 @@ function renderInspector(){
     pointExplanations(pane,null,e.id);return;
   }
   const n=node(annotation?.node||selected.id);if(!n)return;
-  if(!readonly){if(selected.type==='node')selectionControls(pane);if(!isBranch(n))pane.append(nodeTypeField(n));pane.append(field(isBranch(n)?'分支名称':'页面名称',n.title,value=>{editField(()=>n.title=value);sidebar();const title=document.querySelector(`.node[data-id="${n.id}"] .node-header span`);if(title)title.textContent=value;if(current===n.id)$('#viewer-title').textContent=value;if(isBranch(n))drawLines();}));pane.append(isBranch(n)?field('说明正文',explanationText(n),value=>editField(()=>writeExplanation(n,value)),true):descriptionField(n));
+  if(!readonly){if(selected.type==='node')selectionControls(pane);if(!isBranch(n))pane.append(nodeTypeField(n));pane.append(field(isBranch(n)?'分支名称':'页面名称',n.title,value=>{editField(()=>n.title=value);sidebar();const title=document.querySelector(`.node[data-id="${n.id}"] .node-header span`);if(title)title.textContent=value;if(current===n.id)$('#viewer-title').textContent=value;if(isBranch(n))drawLines();}));pane.append(isBranch(n)?field('说明正文',canvasText(n),value=>editField(()=>writeCanvasExplanation(n,value)),true):descriptionField(n));
     heading.append(nodeDeleteButton([n.id]));
-  }else pane.insertAdjacentHTML('beforeend',`<strong>${esc(n.title)}</strong><div class="markdown">${richText(explanationText(n))}</div>`);
+  }else pane.insertAdjacentHTML('beforeend',`<strong>${esc(n.title)}</strong><div class="markdown">${richText(canvasText(n))}</div>`);
   const lost=[...missing].filter(id=>outgoing(n.id).some(e=>e.id===id)||model.annotations.some(a=>a.node===n.id&&a.id===id));if(lost.length&&!readonly)pane.insertAdjacentHTML('beforeend','<p class="missing">页面已变化，部分标记暂未显示。</p>');
 
   pointExplanations(pane,n.id);
@@ -642,16 +643,16 @@ async function uploadImage(file){
 }
 function pasteDescriptionImages(files,id,editor=null){
   if(readonly)return;if(pendingDescriptionNodes.has(id)){notice('图片正在上传，完成后可继续粘贴。',[],'image');return;}
-  const target=node(id);if(!target)return;const before=explanationText(target),beforeHTML=editor?.innerHTML;let marker;
+  const target=node(id);if(!target)return;const before=canvasText(target),beforeHTML=editor?.innerHTML;let marker;
   pendingDescriptionNodes.add(id);
   if(editor){const range=editorRange(editor);marker=document.createElement('span');marker.dataset.uploadPending='true';marker.className='image-uploading';marker.contentEditable='false';marker.textContent='图片上传中…';range.deleteContents();range.insertNode(marker);editor.dataset.uploading='true';editor.contentEditable='false';}
   const job=(async()=>{try{
     const uploaded=[];for(const file of files){const image=await uploadImage(file);uploaded.push(image);bundle.images??={};bundle.images[image.path]=image.src;}
-    const owner=node(id);if(!owner)throw new Error('页面已删除。');if(explanationText(owner)!==before)throw new Error('说明已发生变化，请重新粘贴图片。');
+    const owner=node(id);if(!owner)throw new Error('页面已删除。');if(canvasText(owner)!==before)throw new Error('说明已发生变化，请重新粘贴图片。');
     let text;
     if(editor){const fragment=document.createDocumentFragment();fragment.append(document.createElement('br'));for(const image of uploaded){const img=document.createElement('img');img.alt='说明图片';img.src=image.src;img.dataset.assetPath=image.path;fragment.append(img,document.createElement('br'));}marker.replaceWith(fragment);text=readDescription(editor);}
     else text=[before,...uploaded.map(image=>`![说明图片](${image.path})`)].filter(Boolean).join('\n\n');
-    inputGroup=null;edit(()=>writeExplanation(owner,text),false);updateNote(owner);
+    inputGroup=null;edit(()=>writeCanvasExplanation(owner,text),false);updateNote(owner);
     if($('#message').dataset.kind==='image')$('#message').hidden=true;
     if(editor?.isConnected){editor.innerHTML=richText(text);const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);}
     else if(selected?.id===id)renderInspector();

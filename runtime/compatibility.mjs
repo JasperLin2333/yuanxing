@@ -1,6 +1,6 @@
 // 从同一份项目生成可被研发读取的 manifest/files；不改写页面源与原生播放数据。
 import {expandHTML} from './core.mjs';
-import {defaultDocument,walkDocument} from './document.mjs';
+import {defaultDocument,walkDocument,documentSourceKey} from './document.mjs';
 const compatEscape = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const compatDecode = value => value.replace(/&(?:amp|quot|apos|lt|gt|#\d+|#x[\da-f]+);/gi,entity=>{const named={'&amp;':'&','&quot;':'"','&apos;':"'",'&lt;':'<','&gt;':'>'};if(named[entity.toLowerCase()])return named[entity.toLowerCase()];const number=entity[2].toLowerCase()==='x'?parseInt(entity.slice(3,-1),16):parseInt(entity.slice(2,-1),10);return number>0&&number<=0x10ffff?String.fromCodePoint(number):entity;});
 function compatElements(html) {
@@ -79,12 +79,14 @@ function compatPageHtml(html,marks,defaults) {
   return html;
 }
 
-function compatDocumentText(model) {
+function compatDocumentText(model,documentSources={}) {
   const general=[],byNode=new Map();
   const targets=blocks=>{const ids=new Set();walkDocument(blocks,block=>{if(block.node)ids.add(block.node);if(block.edge){const source=model.edges.find(edge=>edge.id===block.edge)?.from;if(source)ids.add(source);}});return [...ids];};
   const collect=(blocks,context=[])=>{
     for(const block of blocks||[]){
-      if(block.type==='text'&&block.text.trim()){if(context.length)for(const id of context){const texts=byNode.get(id)||[];if(!texts.includes(block.text))texts.push(block.text);byNode.set(id,texts);}else if(!general.includes(block.text))general.push(block.text);}
+      const text=block.type==='text'?block.text:block.type==='source'?documentSources[documentSourceKey(block)]:block.type==='description'&&block.rule?model.rules?.[block.rule]:'';
+      const associated=block.nodes?.length?block.nodes:context;
+      if(text?.trim()){if(associated.length)for(const id of associated){const texts=byNode.get(id)||[];if(!texts.includes(text))texts.push(text);byNode.set(id,texts);}else if(!general.includes(text))general.push(text);}
       if(block.type==='columns'){const own=targets(block.columns.flatMap(column=>column.blocks));for(const column of block.columns)collect(column.blocks,own.length?own:context);}
       if(block.type==='table')for(const row of block.rows){const own=targets(row.cells.flatMap(cell=>cell.blocks));for(const cell of row.cells)collect(cell.blocks,own.length?own:context);}
     }
@@ -96,7 +98,7 @@ export function createCompatibilityBundle(bundle) {
   const model=bundle.model,nodes=model.nodes.filter(n=>n.kind!=='note'),byId=new Map(nodes.map(n=>[n.id,n])),edges=model.edges.filter(e=>!e.diagram&&byId.has(e.from)&&byId.has(e.to)),adjacent=new Map(nodes.map(n=>[n.id,new Set()]));
   for(const edge of edges){adjacent.get(edge.from).add(edge.to);adjacent.get(edge.to).add(edge.from);}
   const components=[],seen=new Set();for(const node of nodes){if(seen.has(node.id))continue;const ids=[],queue=[node.id];while(queue.length){const id=queue.shift();if(seen.has(id))continue;seen.add(id);ids.push(id);queue.push(...adjacent.get(id));}components.push(ids);}
-  const manifest={requirements:[]},files={},bindings=[],limitations=[],documentText=compatDocumentText(model);
+  const manifest={requirements:[]},files={},bindings=[],limitations=[],documentText=compatDocumentText(model,bundle.documentSources);
   for(const ids of components){const group=new Set(ids),pages=nodes.filter(n=>group.has(n.id)),entries=[...(model.experiences||[]),...(model.flows||[])],entry=entries.find(flow=>group.has(flow.entry))?.entry||model.modules.map(m=>m.entry).find(id=>group.has(id))||pages[0].id,groupEdges=edges.filter(e=>group.has(e.from));
     const moduleIds=new Set(pages.map(n=>n.module)),requirement={id:'req-'+Buffer.from(pages[0].id).toString('hex'),title:moduleIds.size===1?model.modules.find(m=>m.id===pages[0].module)?.title||model.title:model.title,states:[],transitions:groupEdges.map((edge,i)=>({id:'T'+(i+1),to:edge.to,text:edge.condition||edge.label||byId.get(edge.to).title})),logic:[]};
     const transitionIds=new Map(groupEdges.map((edge,i)=>[edge.id,'T'+(i+1)]));
@@ -126,7 +128,7 @@ export function createCompatibilityBundle(bundle) {
     if(documentText.general.length)requirement.logic.push({id:'L'+(requirement.logic.length+1),text:documentText.general.join('\n\n')});
     manifest.requirements.push(requirement);
   }
-  return {manifest,files,yuanxing:{version:1,model,document:model.document||defaultDocument(model),images:bundle.images||{},bindings,limitations}};
+  return {manifest,files,yuanxing:{version:1,model,document:model.document||defaultDocument(model),documentSources:bundle.documentSources||{},images:bundle.images||{},bindings,limitations}};
 }
 
 export function compatibilityDataTag(bundle) {

@@ -1,25 +1,30 @@
 import {prototypeDocument,thumbnailHTML,bindNativeDocument,cleanContext} from './player.mjs';
 import {expandHTML,eligibleEdges,nextContext} from './core.mjs';
 
+export function documentPrototypeLayout(node,availableWidth,rect,height) {
+  const width=rect?rect[2]+24:node.width,fullHeight=rect?rect[3]+24:node.height;
+  const scale=Math.min(1,Math.max(.05,(availableWidth-2)/width));
+  return {scale,width:width*scale,height:Math.max(120,height??fullHeight*scale),contentHeight:fullHeight*scale,left:rect?(-rect[0]+12)*scale:0,top:rect?(-rect[1]+12)*scale:0};
+}
 // 每个文档嵌入项拥有自己的播放上下文，翻页和输入不会改写文档或其他嵌入项。
 export function mountDocumentPrototype(host, initialNode, viewport, block) {
   let node=initialNode,context={...host.model().contextDefaults},frame,stage,focusRect,disposed=false;
   const extension=host.extension,bridgeToken=globalThis.crypto.randomUUID();
   const resize=()=>{
     if(!stage||!viewport.isConnected)return;
-    const width=focusRect?focusRect[2]+24:node.width,scale=Math.min(1,Math.max(.05,(viewport.clientWidth-2)/width));
-    stage.style.width=width*scale+'px';stage.style.height=(focusRect?Math.max(120,focusRect[3]+24):node.height)*scale+'px';
-    const content=stage.firstElementChild;if(content){content.style.transform=`scale(${scale})`;content.style.left=(focusRect?(-focusRect[0]+12)*scale:0)+'px';content.style.top=(focusRect?(-focusRect[1]+12)*scale:0)+'px';}
+    const layout=documentPrototypeLayout(node,viewport.clientWidth,focusRect,block.height);
+    stage.style.width=layout.width+'px';stage.style.height=layout.contentHeight+'px';viewport.style.height=(layout.height+2)+'px';
+    const content=stage.firstElementChild;if(content){content.style.transform=`scale(${layout.scale})`;content.style.left=layout.left+'px';content.style.top=layout.top+'px';}
   };
   const outgoing=()=>host.model().edges.filter(edge=>edge.from===node.id&&!edge.diagram);
   const scoped=fn=>host.scope?host.scope({n:node,current:node.id,frames:{[node.id]:frame},frame,experience:true,model:host.model()},fn):fn();
   const follow=edges=>{const edge=eligibleEdges(edges,context)[0];if(!edge)return;context=nextContext(context,edge);const target=host.model().nodes.find(n=>n.id===edge.to&&n.kind!=='note');if(target){node=target;render();}};
   const setFocus=rect=>{if(Array.isArray(rect)&&rect.length===4&&rect.every(Number.isFinite)&&rect[2]>0&&rect[3]>0){focusRect=rect;resize();}};
   const componentBounds=()=>{
-    if(!block.selector||!frame?.contentDocument)return;
+    if(node.id!==initialNode.id||!block.selector||!frame?.contentDocument)return;
     try{const target=frame.contentDocument.querySelector(block.selector);if(target){const rect=target.getBoundingClientRect();setFocus([rect.x+frame.contentWindow.scrollX,rect.y+frame.contentWindow.scrollY,rect.width,rect.height]);}else showComponentMessage();}catch{showComponentMessage();}
   };
-  const showComponentMessage=()=>{let message=viewport.querySelector('.doc-component-message');if(!message){message=document.createElement('p');message.className='doc-component-message';message.textContent='当前页面未找到指定组件，请调整组件选择器。';viewport.append(message);}};
+  const showComponentMessage=()=>{let message=viewport.querySelector('.doc-component-message');if(!message){message=document.createElement('p');message.className='doc-component-message';message.textContent='组件暂时无法显示。';viewport.append(message);}};
   let componentObserver;
   function render(){
     frame=null;focusRect=null;componentObserver?.disconnect();viewport.replaceChildren();stage=document.createElement('div');stage.className='doc-prototype-stage';viewport.append(stage);

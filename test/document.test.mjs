@@ -4,8 +4,10 @@ import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
-import {defaultDocument,ensureDocument,findDocumentBlock,newDocumentBlock,moveDocumentBlock,walkDocument} from '../runtime/document.mjs';
-import {clone,validate,removeNodes,removeConnections,exportSubset,mergeProject,descriptionImagePaths,markdown,readDescription} from '../runtime/core.mjs';
+import {defaultDocument,ensureDocument,findDocumentBlock,newDocumentBlock,moveDocumentBlock,walkDocument,extractDocumentSource,documentSourceKey} from '../runtime/document.mjs';
+import {clone,validate,removeNodes,removeConnections,exportSubset,mergeProject,descriptionImagePaths,markdown,readDescription,requirementText,canvasExplanation,writeCanvasExplanation} from '../runtime/core.mjs';
+import {documentPrototypeLayout} from '../runtime/document-player.mjs';
+import {createCompatibilityBundle} from '../runtime/compatibility.mjs';
 import {createStore,standalone,createHandler} from '../runtime/server.mjs';
 import {Readable} from 'node:stream';
 import {run} from '../scripts/yuanxing.mjs';
@@ -19,7 +21,7 @@ async function project(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'yua
 
 test('旧项目打开文档时保持源数据不变，页面与说明引用同一个对象',()=>{
   const model=sample(),before=JSON.stringify(model),doc=defaultDocument(model);assert.equal(JSON.stringify(model),before);
-  assert.equal(doc.blocks.filter(b=>b.type==='table').length,2);let page,description;walkDocument(doc.blocks,block=>{if(block.node==='detail'&&block.type==='prototype')page=block;if(block.node==='detail'&&block.type==='description')description=block;});assert(page&&description);assert(!('text' in description));
+  assert(!doc.blocks.some(b=>b.type==='table'));let page,description;walkDocument(doc.blocks,block=>{if(block.node==='detail'&&block.type==='prototype')page=block;if(block.node==='detail'&&block.type==='description')description=block;});assert(page&&description);assert(doc.blocks.indexOf(page)<doc.blocks.indexOf(description));assert(!('text' in description));
   ensureDocument(model);model.nodes[1].description='修改后规则';assert(!JSON.stringify(model.document).includes('填写负责成员'));assert.deepEqual(validate(model),[]);
 });
 test('正文能跨单元格编排，同时拒绝将分栏拖入自己的子内容',()=>{
@@ -57,4 +59,46 @@ test('三种离线导出携带同一文档、页面源和可独立读取的研�
 test('document CLI 使用独立输出并保护已有文件，开发入口提供文档模块',async t=>{
   const {root}=await project(t);await run(['export','--root',root,'--view','document']);assert((await fs.stat(path.join(root,'dist/document.html'))).size>1000);await assert.rejects(run(['export','--root',root,'--view','document']),/已存在/);
   const handler=createHandler(await createStore(root),'session');for(const url of ['/document.mjs','/document-player.mjs']){const request=Readable.from([]);Object.assign(request,{method:'GET',url,headers:{host:'localhost:4318'}});let status,body;await handler(request,{writeHead(code){status=code;},end(value){body=value;}});assert.equal(status,200);assert(body.includes('export function'));}
+});
+
+test('画布摘要修改不覆盖完整规则，详细正文修改也不抹去摘要',()=>{
+  const model=sample(),node=model.nodes[0];model.rules={permission:'只有管理员可以分配。'};node.rule='permission';
+  assert.equal(canvasExplanation(model,node),'选择客户后分配。\n\n只有管理员可以分配。');
+  writeCanvasExplanation(node,'从列表发起客户分配。');assert.equal(canvasExplanation(model,node),'从列表发起客户分配。');assert.equal(requirementText(model,node),'选择客户后分配。\n\n只有管理员可以分配。');
+  node.description='选择客户后进入分配表单。';assert.equal(canvasExplanation(model,node),'从列表发起客户分配。');assert(requirementText(model,node).includes('只有管理员'));
+  const note={kind:'note',description:'流程说明'};writeCanvasExplanation(note,'补充说明');assert.equal(note.description,'补充说明');
+  const base=clone(model),local=clone(base),remote=clone(base);writeCanvasExplanation(local.nodes[0],'人工摘要');remote.nodes[0].description='AI 补充完整规则';const merged=mergeProject(base,local,remote);assert.deepEqual(merged.conflicts,[]);assert.equal(merged.model.nodes[0].summary,'人工摘要');assert.equal(merged.model.nodes[0].description,'AI 补充完整规则');
+});
+
+test('引用章节包含子节，忽略代码中的伪标题并拒绝失效或重名定位',()=>{
+  const text='# 需求\n## 背景\n原背景\n## 分配\n规则\n### 确认\n选成员\n```text\n## 伪标题\n```\n## 其他\n未选内容';
+  const selected=extractDocumentSource(text,'分配');assert(selected.includes('选成员'));assert(selected.includes('## 伪标题'));assert(!selected.includes('未选内容'));assert(!extractDocumentSource(text,'分配',true).startsWith('## 分配'));
+  assert.throws(()=>extractDocumentSource(text,'不存在'),/不存在/);assert.throws(()=>extractDocumentSource('## 重复\na\n## 重复\nb','重复'),/重复/);
+  assert.match(markdown(selected),/<h2>分配<\/h2>/);assert.match(markdown(selected),/<h3>确认<\/h3>/);
+});
+
+test('引用正文与图片变化更新版本，离线及基础交付保留所选规则且不泄露未选章节',async t=>{
+  const {root,model}=await project(t),file=path.join(root,'需求.md');
+  await fs.writeFile(file,'# 需求\n## 分配\n只有管理员可分配。\n![规则](artifact/assets/rule.png)\n## 未选\n私有未选内容');
+  const image=path.join(root,'artifact/assets/rule.png');await fs.writeFile(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nm9sAAAAASUVORK5CYII=','base64'));
+  model.document={version:1,blocks:[{id:'requirements',type:'source',path:'需求.md',section:'分配',nodes:['list']}]};await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));
+  const store=await createStore(root),first=await store.load(),status1=await store.status();assert(first.documentSources[documentSourceKey(model.document.blocks[0])].includes('只有管理员'));assert(Object.keys(first.images).some(key=>key.startsWith('assets/source-')));
+  const payload=createCompatibilityBundle(first);assert(payload.manifest.requirements.flatMap(r=>r.logic).some(l=>l.text.includes('只有管理员')));assert(!JSON.stringify(payload).includes('私有未选内容'));
+  const copied={...model.document.blocks[0],id:'copied-reference'};assert.equal(first.documentSources[documentSourceKey(copied)],first.documentSources[documentSourceKey(model.document.blocks[0])]);
+  const html=await standalone(first,{view:'document'});assert(html.includes('只有管理员'));assert(!html.includes('私有未选内容'));assert(!html.includes(root));assert(html.includes('data:image/png;base64,'));
+  await fs.writeFile(file,(await fs.readFile(file,'utf8')).replace('只有管理员','具备权限的管理员'));const second=await store.load();assert.notEqual(second.sourcesSignature,first.sourcesSignature);assert.notEqual((await store.status()).sourceVersion,status1.sourceVersion);
+  const beforeImage=(await store.status()).sourceVersion;await fs.appendFile(image,Buffer.from([0]));assert.notEqual((await store.status()).sourceVersion,beforeImage);
+});
+
+test('正文引用保护项目边界，失效章节阻止导出，单模块不携带其他模块专属正文',async t=>{
+  const {root,model}=await project(t);model.document={version:1,blocks:[{id:'owned',type:'source',path:'需求.md',section:'分配',nodes:['list']},{id:'other-owned',type:'source',path:'需求.md',section:'其他',nodes:['other']}]};
+  const subset=exportSubset(model,'main');assert(findDocumentBlock(subset,'owned'));assert(!findDocumentBlock(subset,'other-owned'));assert.deepEqual(validate(subset),[]);
+  model.document.blocks[0].path='../outside.md';assert(validate(model).some(error=>error.includes('路径')));model.document.blocks=[{id:'bad',type:'source',path:'需求.md',section:'不存在'}];await fs.writeFile(path.join(root,'需求.md'),'## 其他\n内容');await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));await assert.rejects((await createStore(root)).load(),/不存在/);
+  await fs.symlink(path.join(root,'..'),path.join(root,'outside'));model.document.blocks[0].path='outside/secret.md';await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));await assert.rejects((await createStore(root)).load(),/越界|ENOENT/);
+});
+
+test('页面和组件自动按宽度与比例显示，仍兼容已有视口数据',()=>{
+  const node={width:1280,height:800},page=documentPrototypeLayout(node,642);assert.equal(page.scale,.5);assert.equal(page.height,400);assert.equal(page.width,640);
+  const component=documentPrototypeLayout(node,402,[100,200,176,100]);assert.equal(component.width,200);assert.equal(component.height,124);assert.equal(component.left,-88);assert.equal(component.top,-188);
+  assert.equal(documentPrototypeLayout(node,642,null,480).height,480);
 });

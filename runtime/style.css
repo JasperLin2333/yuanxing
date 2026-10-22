@@ -394,16 +394,15 @@ blockquote.doc-text{border-left:3px solid #b6c8bc;margin:8px 0;padding:6px 16px;
 .doc-table:hover>.doc-table-grid>.doc-table-tools,.doc-table:focus-within>.doc-table-grid>.doc-table-tools{opacity:1}
 .doc-table-tools button{font-size:11px;color:#7c8796;height:24px;padding:2px 6px;border:0;background:transparent}
 .doc-prototype-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-height:29px;margin-bottom:8px;color:#687386;font-size:12px}
-.doc-prototype-bar select,.doc-prototype-bar input,.doc-prototype-bar button{font-size:11px;max-width:100%;min-width:0;height:26px;padding:2px 6px;background:white;border:1px solid #e7ebf0;color:#627087}
-.doc-prototype-bar select{max-width:200px}.doc-prototype-bar input:not(.doc-height){flex:1;min-width:100px}
-.doc-prototype-bar .doc-height{width:64px}.readonly .doc-prototype-bar{font-size:13px;font-weight:500;color:#5c6675}
+.doc-prototype-bar{font-size:13px;font-weight:500;color:#5c6675}
 .doc-prototype-viewport{position:relative;max-width:100%;overflow:auto;background:#fafbfc;border:1px solid #e8ecf1;border-radius:4px;min-height:120px}
-.doc-prototype-stage{position:relative;overflow:hidden;min-height:1px}
+.doc-prototype-stage{position:relative;overflow:hidden;min-height:1px;margin:0 auto}
 .doc-prototype-stage>iframe,.doc-prototype-stage>img{position:absolute;left:0;top:0;transform-origin:0 0;border:0;max-width:none}
 .doc-image-hotspot{position:absolute;z-index:2;padding:0;border:0!important;background:transparent!important}
 .doc-component-message{position:absolute;inset:12px 12px auto;padding:10px;color:#805f32;background:#fff7e8;font-size:12px;border:1px solid #f2dfbc}
 .doc-image{display:block;max-width:100%;height:auto;margin:0 auto}.doc-text img{max-width:100%;height:auto}
 @media(max-width:900px){.doc-paper{width:calc(100% - 24px);padding:28px 24px}.doc-toolbar{padding:8px 12px}.doc-cell{padding:10px}.doc-block-tools{right:0;top:-24px}}
 
-.doc-toolbar select,.doc-prototype-bar select,.doc-prototype-bar input,.doc-format,.doc-insert{margin:0;width:auto}
-.doc-toolbar button,.doc-toolbar select,.doc-block-tools button,.doc-block-tools select,.doc-block-tools summary,.doc-table-tools button,.doc-prototype-bar button,.doc-prototype-bar select,.doc-prototype-bar input,.doc-format,.doc-insert{min-height:0}
+.doc-toolbar select,.doc-format,.doc-insert{margin:0;width:auto}
+.doc-toolbar button,.doc-toolbar select,.doc-block-tools button,.doc-block-tools select,.doc-block-tools summary,.doc-table-tools button,.doc-format,.doc-insert{min-height:0}
+.doc-text h1,.doc-text h2{font-size:24px;line-height:1.6;margin:26px 0 12px}.doc-text h3{font-size:20px;line-height:1.6;margin:22px 0 10px}.doc-text h4{font-size:17px;line-height:1.6;margin:18px 0 8px}.doc-text h5,.doc-text h6{font-size:15px;line-height:1.7;margin:16px 0 6px}

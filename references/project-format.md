@@ -37,7 +37,7 @@
 
 ## 页面与画布
 
-- `modules` 为模块，`nodes` 为页面、截图或说明。`kind` 为 `html`、`image` 或 `note`；说明写入 `description`。`x/y` 是画布位置，`width/height` 是原页面尺寸，不能用缩略卡片尺寸替代。
+- `modules` 为模块，`nodes` 为页面、截图或说明。`kind` 为 `html`、`image` 或 `note`；详细说明写入 `description`，画布核心说明写入可选 `summary`，连线也支持这两个字段。`x/y` 是画布位置，`width/height` 是原页面尺寸，由 Agent 维护，不能用缩略卡片尺寸替代。
 - `canvasType: "pc" | "mobile"` 只决定卡片类型。移动 HTML 可按尺寸自动识别。
 - `canvas: false` 将仍需播放的操作状态与画布展示分开，不出现在画布或回收站，导出时保留；Agent 可用它保存交互需要的中间状态。
 - `overview: false` 且未设置 `canvas: false` 的普通节点进入回收站；导出时排除这些节点及关联连线、批注与专属资源。仍需在原型中跳转的状态应同时设置 `canvas: false`；需要归并到可见页面时使用 `overviewAlias`。
@@ -87,7 +87,7 @@ HTML 批注可增加 `selector` 和 `offset: [0.5,0.5]` 以跟随元素，`point
 
 ## 说明数据与局部 UI 交付
 
-已有 `rules` 正文及节点、连线的 `rule` 引用继续用于读取说明；用户不必维护逻辑标识。直接编辑当前对象时，合并后的说明写入该对象的 `description`，解除该对象原有 `rule` 引用，其他对象不变。跨页面修改由 Agent 按用户指定范围查找语义相关的源页面、说明和交互，同步实际内容；不能只改某个 `rules[id]` 就声称已覆盖全部相关位置。编排修改沿用下方的并行保存入口。
+已有 `rules` 正文及节点、连线的 `rule` 引用继续用于读取详细规则；用户不必维护逻辑标识。画布直接编辑只更新 `summary`，保留详细说明与规则引用；文档编辑绑定的详细说明时写入该对象 `description` 并解除其 `rule` 引用，其他对象不变。说明便签仍直接修改正文。跨页面修改由 Agent 按用户指定范围查找语义相关的源页面、说明和交互，同步实际内容；不能只改某个 `rules[id]` 就声称已覆盖全部相关位置。编排修改沿用下方的并行保存入口。
 
 开发交付模式是浏览器内临时状态，不写入编排，导出后默认关闭。可选的项目扩展 `handoffContext(node)` 返回 `{sources: ["artifact/modules/page.html", "scripts/build.py"]}`，用于指出实际编辑源文件；不把生成的预览页冒充唯一源文件。选择范围只读取 DOM、样式和必要依赖，不更改业务文件。
 

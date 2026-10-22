@@ -374,9 +374,15 @@ export function restoreView(model,saved) {
   return {moduleId,current,camera:validCamera(saved.camera)&&moduleId===saved.moduleId?saved.camera:null,cameras:Object.fromEntries(model.modules.filter(m=>validCamera(saved.cameras?.[m.id])).map(m=>[m.id,saved.cameras[m.id]])),flowContext:isFlowContext(saved.flowContext)?saved.flowContext:clone(model.contextDefaults||{}),linesHidden:saved.linesHidden===true};
 }
 export const isImagePath = value => typeof value==='string' && /^assets\/[^?#\\\u0000-\u001f]+\.(png|jpe?g|webp)$/i.test(value) && value.split('/').every(part=>part&&part!=='.'&&part!=='..');
+export function requirementText(model,owner) {
+  const own=String(owner.description||'').trim(),rule=String(model.rules?.[owner.rule]||'').trim();
+  return !rule||own===rule||own.includes(rule)?own:[own,rule].filter(Boolean).join('\n\n');
+}
+export const canvasExplanation = (model,owner) => owner.kind==='note'?requirementText(model,owner):owner.summary??requirementText(model,owner);
+export function writeCanvasExplanation(owner,text) {if(owner.kind==='note'){owner.description=text;delete owner.rule;}else owner.summary=text;}
 const imagePattern = /`[^`]*`|!\[([^\]\n]*)\]\(([^)\n]+)\)/g;
 export function descriptionImagePaths(model) {
-  const texts=[...model.nodes.map(n=>n.description),...model.edges.map(e=>e.description),...model.annotations.map(a=>a.text),...Object.values(model.rules||{})];
+  const texts=[...model.nodes.flatMap(n=>[n.description,n.summary]),...model.edges.flatMap(e=>[e.description,e.summary]),...model.annotations.map(a=>a.text),...Object.values(model.rules||{})];
   return [...new Set([...texts.flatMap(text=>[...String(text||'').matchAll(imagePattern)].filter(m=>m[2]!==undefined).map(m=>m[2])),...documentAssetPaths(model)])];
 }
 export function expandHTML(text, fragments, trail=[]) {
@@ -400,6 +406,7 @@ export function validate(model) {
     if(n.canvasType!==undefined&&!['pc','mobile'].includes(n.canvasType))errors.push(`节点类型不正确：${n.title}`);
     if (![n.x,n.y].every(Number.isFinite)) errors.push(`画布位置不正确：${n.title}`);
     if (n.rule && typeof model.rules?.[n.rule]!=='string') errors.push(`页面规则不存在：${n.title}`);
+    if(n.summary!==undefined&&typeof n.summary!=='string')errors.push(`页面核心说明不正确：${n.title}`);
     if(n.canvas!==undefined&&typeof n.canvas!=='boolean')errors.push(`页面画布设置不正确：${n.title}`);
     if(n.overview!==undefined&&typeof n.overview!=='boolean')errors.push(`页面概览设置不正确：${n.title}`);
     if(n.presentation!==undefined&&(n.presentation!=='branch'||n.kind!=='note'))errors.push(`分支节点格式不正确：${n.title}`);
@@ -413,6 +420,7 @@ export function validate(model) {
     if (!e.id || edgeIds.has(e.id)) errors.push('连线标识重复或为空'); edgeIds.add(e.id);
     if (!ids.has(e.from) || !ids.has(e.to)) errors.push(`连线目标不存在：${e.label}`);
     if(e.rule && typeof model.rules?.[e.rule]!=='string')errors.push(`操作规则不存在：${e.label}`);
+    if(e.summary!==undefined&&typeof e.summary!=='string')errors.push(`操作核心说明不正确：${e.label}`);
     if((e.when!==undefined&&!isFlowContext(e.when))||(e.setContext!==undefined&&!isFlowContext(e.setContext)))errors.push(`操作条件不正确：${e.label}`);
     if(['fromSide','toSide'].some(key=>e[key]!==undefined&&!connectionSides.includes(e[key])))errors.push(`连线端点不正确：${e.label}`);
     if(e.overview!==undefined&&typeof e.overview!=='boolean')errors.push(`连线概览设置不正确：${e.label}`);
@@ -694,13 +702,15 @@ export function markdown(text, images={}) {
     const item=line.match(/^\s*(?:([-*])\s+|(\d+)\.\s+)(.*)$/);
     if(item){const tag=item[2]?'ol':'ul';if(list!==tag){if(list)out+=`</${list}>`;out+=`<${tag}>`;list=tag;}out+=`<li>${inline(item[3])}</li>`;continue;}
     if(list){out+=`</${list}>`;list=null;}
+    const heading=line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if(heading){const level=heading[1].length;out+=`<h${level}>${inline(heading[2])}</h${level}>`;continue;}
     out+=line?`<p>${inline(line)}</p>`:'<br>';
   }
   return out+(list?`</${list}>`:'')+(table?'</table>':'');
 }
 // 说明编辑区只序列化文字、基础格式与已上传图片，不保留外部粘贴的 HTML。
 export function readDescription(root) {
-  const children=el=>[...el.childNodes].reduce((text,child)=>{const block=child.nodeType===1&&['P','DIV','UL','OL','TABLE'].includes(child.tagName);return text+(block&&text&&!text.endsWith('\n')?'\n\n':'')+read(child);},'');
+  const children=el=>[...el.childNodes].reduce((text,child)=>{const block=child.nodeType===1&&['P','DIV','UL','OL','TABLE','H1','H2','H3','H4','H5','H6'].includes(child.tagName);return text+(block&&text&&!text.endsWith('\n')?'\n\n':'')+read(child);},'');
   function read(el){
     if(el.nodeType===3)return el.textContent.replace(/\u00a0/g,' ');
     if(el.nodeType!==1||el.hasAttribute('data-upload-pending'))return '';
@@ -710,6 +720,7 @@ export function readDescription(root) {
     if(tag==='STRONG'||tag==='B')return `**${children(el)}**`;
     if(tag==='EM'||tag==='I')return `*${children(el)}*`;
     if(tag==='CODE')return '`'+children(el)+'`';
+    if(/^H[1-6]$/.test(tag))return '#'.repeat(Number(tag[1]))+' '+children(el)+'\n\n';
     if(tag==='UL'||tag==='OL')return [...el.children].map((li,index)=>(tag==='OL'?`${index+1}. `:'- ')+children(li).trim()).join('\n')+'\n\n';
     if(tag==='TABLE'){
       const rows=[...el.querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>children(td).trim().replace(/\n/g,' ')));
