@@ -6,19 +6,15 @@ import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {inlineHTML} from './resources.mjs';
 import {promisify} from 'node:util';
-import {compatibilityDataTag} from './compatibility.mjs';
-import {documentSourceBlocks,documentSourceKey,extractDocumentSource} from './document.mjs';
+import {compatibilityDataTag,createCompatibilityBundle} from './compatibility.mjs';
+import {compactExportBoot,restoreExportBoot} from './export-data.mjs';
+import {safePath} from './paths.mjs';
+export {safePath} from './paths.mjs';
+import {documentSourceBlocks,documentSourceKey,extractDocumentSource,patchDocumentSource} from './document.mjs';
 import {clone,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,recycleNodes,removeNodes,mergeProject} from './core.mjs';
 const exec=promisify(execFile),tool=path.dirname(fileURLToPath(import.meta.url));
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const inside=(root,target)=>target===root||target.startsWith(root+path.sep);
-export async function safePath(root,relative,writing=false){
-  if(typeof relative!=='string'||path.isAbsolute(relative)||relative.includes('\\')||relative.split('/').includes('..'))throw new Error('资源路径越界');
-  const target=path.resolve(root,relative);if(!inside(root,target))throw new Error('资源路径越界');
-  const canonicalRoot=await fs.realpath(root),real=await fs.realpath(writing?path.dirname(target):target);if(!inside(canonicalRoot,real))throw new Error('资源符号链接越界');
-  if(writing)try{if(!inside(canonicalRoot,await fs.realpath(target)))throw new Error('资源符号链接越界');}catch(error){if(error.code!=='ENOENT')throw error;}
-  return target;
-}
 // 版本探测只读文件元数据，不重复读取和编码页面、图片。ctime 同时覆盖保留 mtime 的替换。
 async function fingerprint(target){
   try{
@@ -90,7 +86,7 @@ export async function createStore(root,{builder,validator,extension}={}){
       await exec('python3',[script],{cwd:root,maxBuffer:2*1024*1024});buildSig=sig;
     })();building=job;try{await job;}finally{if(building===job)building=null;}
   }
-  async function load(){const {model,revision}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));await buildIfNeeded(model);const resources={},fragments={},images={},documentSources={};
+  async function load(){const {model,revision}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));await buildIfNeeded(model);const resources={},fragments={},images={},documentSources={},documentSourceVersions={};
     async function readImage(relative){const file=await safePath(artifact,relative),mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}[path.extname(file).toLowerCase()];if(!mime)throw new Error('图片格式不支持');return `data:${mime};base64,${(await fs.readFile(file)).toString('base64')}`;}
     async function addFragment(key,trail=[]){if(trail.includes(key))throw new Error('组件循环引用');if(fragments[key]!==undefined)return;const file=await safePath(artifact,key),input=await fs.readFile(file,'utf8'),text=projectExtension?.declarative?freeze(input):await inlineHTML(input,file,artifact);fragments[key]=text;for(const match of text.matchAll(/<!--\s*include:([^>]+?)\s*-->/g))await addFragment(match[1],[...trail,key]);}
     for(const n of model.nodes){if(n.kind==='note')continue;const file=await safePath(artifact,n.path);if(n.kind==='image'){resources[n.id]=await readImage(n.path);}else{const input=await fs.readFile(file,'utf8');resources[n.id]=projectExtension?.declarative?freeze(input):await inlineHTML(input,file,artifact);for(const match of resources[n.id].matchAll(/<!--\s*include:([^>]+?)\s*-->/g))await addFragment(match[1]);assertOffline(expandHTML(resources[n.id],fragments),n.title,projectExtension?.declarative);}}
@@ -99,6 +95,7 @@ export async function createStore(root,{builder,validator,extension}={}){
     for(const block of documentSourceBlocks(model)){
       if(!sourceFiles.has(block.path))sourceFiles.set(block.path,await fs.readFile(await safePath(root,block.path),'utf8'));
       let text=extractDocumentSource(sourceFiles.get(block.path),block.section,block.omitHeading);
+      documentSourceVersions[documentSourceKey(block)]=sha(text);
       const replacements=new Map();
       for(const match of text.matchAll(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g))if(match[1]){
         const relative=path.posix.normalize(path.posix.join(path.posix.dirname(block.path),match[1]));
@@ -108,15 +105,14 @@ export async function createStore(root,{builder,validator,extension}={}){
       }
       text=text.replace(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g,match=>replacements.get(match)||match);documentSources[documentSourceKey(block)]=text;
     }
-    return {model,revision,runtimeVersion:await runtimeVersion(),resources,fragments,images,documentSources,sourcesSignature:sha(JSON.stringify(resources)+JSON.stringify(fragments)+JSON.stringify(images)+JSON.stringify(documentSources)),sourceVersion:await sourceVersion(model)};
+    return {model,revision,runtimeVersion:await runtimeVersion(),resources,fragments,images,documentSources,documentSourceVersions,sourcesSignature:sha(JSON.stringify(resources)+JSON.stringify(fragments)+JSON.stringify(images)+JSON.stringify(documentSources)),sourceVersion:await sourceVersion(model)};
   }
   async function transaction(operation){const previous=queue;let release;queue=new Promise(resolve=>release=resolve);await previous;try{return await operation();}finally{release();}}
   function assertRevision(actual,revision,required=false){if((required||revision!==undefined)&&actual.revision!==revision){const error=new Error('项目已被外部修改');error.status=409;throw error;}}
   function assertModel(model){const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));}
   async function writeModel(model,revision){const raw=JSON.stringify(model,null,2)+'\n',tmp=modelFile+'.'+randomUUID()+'.tmp';await fs.writeFile(tmp,raw,{flag:'wx'});try{assertRevision(await readModel(),revision);await fs.rename(tmp,modelFile);}finally{await fs.rm(tmp,{force:true});}return {revision:sha(raw)};}
   async function materializeCopies(model){for(const node of model.nodes.filter(n=>n.kind==='html'&&n.copySourcePath)){const target=await safePath(artifact,node.path,true);try{await fs.access(target);continue;}catch(error){if(error.code!=='ENOENT')throw error;}const source=await safePath(artifact,node.copySourcePath);await fs.copyFile(source,target,1);}}
-  async function save(model,revision,baseModel){return transaction(async()=>{
-    assertModel(model);
+  async function withProjectLock(operation){return transaction(async()=>{
     // CLI 与网页使用同一把项目锁；不覆盖其他写入方的锁。
     let lock;for(let attempt=0;attempt<80;attempt++){
       try{lock=await fs.open(modelFile+'.lock','wx');break;}
@@ -130,6 +126,10 @@ export async function createStore(root,{builder,validator,extension}={}){
     if(!lock){const error=new Error('其他编辑正在保存，请稍后重试。');error.status=423;throw error;}
     try{
       await lock.writeFile(JSON.stringify({pid:process.pid}));
+      return await operation();
+    }finally{await lock.close();await fs.rm(modelFile+'.lock',{force:true});}
+  });}
+  async function save(model,revision,baseModel){assertModel(model);return withProjectLock(async()=>{
       const actual=await readModel();let next=model;
       if(actual.revision!==revision){
         if(!baseModel)assertRevision(actual,revision,true);
@@ -140,11 +140,44 @@ export async function createStore(root,{builder,validator,extension}={}){
       assertModel(next);await materializeCopies(next);
       const saved=sha(JSON.stringify(next,null,2)+'\n')===actual.revision?{revision:actual.revision}:await writeModel(next,actual.revision);
       return {...saved,model:next};
-    }finally{await lock.close();await fs.rm(modelFile+'.lock',{force:true});}
+  });}
+  async function saveDocumentSource(change){return withProjectLock(async()=>{
+    const conflict=()=>Object.assign(new Error('这段需求已在别处修改，当前输入已保留，请让 AI 合并。'),{status:409});
+    const actual=await readModel(),block=documentSourceBlocks(actual.model).find(item=>item.id===change.id);
+    if(!block||documentSourceKey(block)!==change.key)throw conflict();
+    const file=await safePath(root,block.path),original=await fs.readFile(file,'utf8'),selected=extractDocumentSource(original,block.section,block.omitHeading);
+    if(sha(selected)!==change.version)throw conflict();
+    const aliases=new Map();
+    for(const match of selected.matchAll(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g))if(match[1]){const relative=path.posix.normalize(path.posix.join(path.posix.dirname(block.path),match[1]));aliases.set('assets/source-'+sha(relative).slice(0,20)+path.extname(relative).toLowerCase(),match[1]);}
+    const restore=value=>typeof value==='string'?value.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g,(all,alt,url)=>aliases.has(url)?`![${alt}](${aliases.get(url)})`:all):value;
+    const patched=patchDocumentSource(original,block,{...change,before:restore(change.before),value:restore(change.value)}),next=clone(actual.model),beforeVersions={},documentSources={},documentSourceVersions={},keyChanges={};
+    const prior=documentSourceBlocks(actual.model).filter(item=>item.path===block.path),after=documentSourceBlocks(next).filter(item=>item.path===block.path);
+    for(const item of prior)beforeVersions[documentSourceKey(item)]=sha(extractDocumentSource(original,item.section,item.omitHeading));
+    for(const item of after){
+      const oldKey=documentSourceKey(item);if(patched.rename&&item.section===patched.rename.before)item.section=patched.rename.after;
+      const key=documentSourceKey(item);keyChanges[oldKey]=key;
+      let text=extractDocumentSource(patched.text,item.section,item.omitHeading);documentSourceVersions[key]=sha(text);
+      const replacements=new Map();
+      for(const match of text.matchAll(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g))if(match[1]){
+        const relative=path.posix.normalize(path.posix.join(path.posix.dirname(item.path),match[1])),image=await safePath(root,relative);
+        if(!/\.(png|jpe?g|webp)$/i.test(image))throw new Error('需求正文图片格式不支持');
+        const alias='assets/source-'+sha(relative).slice(0,20)+path.extname(image).toLowerCase();replacements.set(match[0],match[0].replace('('+match[1]+')','('+alias+')'));
+      }
+      documentSources[key]=text.replace(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g,match=>replacements.get(match)||match);
+    }
+    const tmp=file+'.'+randomUUID()+'.tmp';let revision=actual.revision;
+    try{
+      await fs.writeFile(tmp,patched.text,{flag:'wx',mode:(await fs.stat(file)).mode});
+      assertRevision(await readModel(),actual.revision);if(await fs.readFile(file,'utf8')!==original)throw conflict();
+      await fs.rename(tmp,file);
+      try{if(JSON.stringify(next)!==JSON.stringify(actual.model))revision=(await writeModel(next,actual.revision)).revision;}
+      catch(error){if(await fs.readFile(file,'utf8')===patched.text)await fs.writeFile(file,original);throw error;}
+    }finally{await fs.rm(tmp,{force:true});}
+    return {model:next,revision,documentSources,documentSourceVersions,beforeVersions,keyChanges};
   });}
   async function upload({type,data}){const allowed={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};if(!allowed[type]||typeof data!=='string'||!data.startsWith(`data:${type};base64,`))throw new Error('图片格式不支持');const bytes=Buffer.from(data.split(',')[1],'base64');const valid=type==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):type==='image/jpeg'?bytes[0]===255&&bytes[1]===216:bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP';if(!valid)throw new Error('图片内容不正确');await fs.mkdir(path.join(artifact,'assets'),{recursive:true});const relative=`assets/${randomUUID()}.${allowed[type]}`;await fs.writeFile(await safePath(artifact,relative,true),bytes,{flag:'wx'});return {path:relative};}
   async function check(){const {model}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));if(validator)await exec('python3',[await safePath(root,validator),'--validate'],{cwd:root,maxBuffer:2*1024*1024});}
-  return {root,artifact,load,status,readModel,save,upload,check,extension:projectExtension};
+  return {root,artifact,load,status,readModel,save,saveDocumentSource,upload,check,extension:projectExtension};
 }
 export async function standalone(bundle,{module,entryModule,view='review',flow,extension}={}){
   const projectExtension=typeof extension==='string'?await loadProjectExtension(extension):extension;
@@ -163,9 +196,11 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const extensionCode=projectExtension?(await Promise.all(projectExtension.files.map(async file=>fs.readFile(await safePath(projectExtension.root,file),'utf8')))).map(strip).join('\n'):strip(await fs.readFile(path.join(tool,'extension.mjs'),'utf8'));
   const vendors=(await Promise.all(['libavoid.min.js','libavoid-routing.js'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n');
   const licenses=(await Promise.all(['LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE','THIRD-PARTY-README.md'].map(name=>fs.readFile(path.join(tool,name),'utf8')))).join('\n\n');
-  const data=JSON.stringify({readonly:true,view,flow,bundle:{model,resources,fragments,images,documentSources}}).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
-  let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([routing,documentCode,core,player,documentPlayer,handoff,library,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
-  html=html.replace('</head>',()=>compatibilityDataTag({model,resources,fragments,images,documentSources})+'</head>');
+  const exportBundle={model,resources,fragments,images,documentSources},compatible=createCompatibilityBundle(exportBundle);
+  const data=JSON.stringify(compactExportBoot({readonly:true,view,flow,bundle:exportBundle},compatible)).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+  const restore=`if(globalThis.YUANXING_BOOT.sharedStrings)globalThis.YUANXING_BOOT=(${restoreExportBoot.toString()})(globalThis.YUANXING_BOOT,JSON.parse(document.getElementById('yuanxing-artifact').textContent));`;
+  let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([restore,routing,documentCode,core,player,documentPlayer,handoff,library,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
+  html=html.replace('</head>',()=>compatibilityDataTag(exportBundle,compatible)+'</head>');
   return html;
 }
 async function body(req){const parts=[];let bytes=0;for await(const part of req){const buffer=Buffer.isBuffer(part)?part:Buffer.from(part);bytes+=buffer.length;if(bytes>64*1024*1024)throw new Error('图片或数据过大');parts.push(buffer);}return JSON.parse(Buffer.concat(parts,bytes).toString('utf8')||'{}');}
@@ -177,6 +212,7 @@ export function createHandler(store,token,{basePath="",projectId,projects}={}){r
     if(req.method==='GET'&&url.pathname==='/api/project/status')return send(200,await store.status());
     if(req.method==='PUT'&&url.pathname==='/api/project'){const data=await body(req);return send(200,await store.save(data.model,data.revision,data.baseModel));}
     if(req.method==='POST'&&url.pathname==='/api/image')return send(200,await store.upload(await body(req)));
+    if(req.method==='PUT'&&url.pathname==='/api/document/source')return send(200,await store.saveDocumentSource(await body(req)));
     if(req.method==='POST'&&url.pathname==='/api/export'){await store.check();return send(200,await standalone(await store.load(),{...await body(req),extension:store.extension}),'text/html');}
     if(req.method==='GET'&&url.pathname==='/'){const runtimeVersion=(await store.status()).runtimeVersion;let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<script type="module" src="/app.mjs">',`<script>globalThis.YUANXING_BOOT={...${JSON.stringify({token,basePath,projectId,projects,runtimeVersion}).replace(/</g,"\\u003c")}};</script><script type="module" src="/app.mjs">`);if(basePath)html=html.replace('href="/style.css"',`href="${basePath}/style.css"`).replace('src="/app.mjs"',`src="${basePath}/app.mjs"`);return send(200,html,'text/html');}
     if(req.method==='GET'&&url.pathname==='/extension.mjs')return send(200,store.extension?await extensionSource(store.extension,store.extension.entry,basePath):await fs.readFile(path.join(tool,'extension.mjs'),'utf8'),'text/javascript');

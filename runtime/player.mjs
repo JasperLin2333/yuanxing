@@ -48,6 +48,40 @@ export function bindNativeDocument(doc,{getEdges,follow,onInput,onKeyDown}){
   doc.addEventListener('keydown',event=>onKeyDown?.(event));
 }
 
+// 同一手势绑定用于文档查看区与 iframe；可独立序列化到隔离页面。
+export function bindDocumentCanvasGestures(doc,send,{frame=false}={}) {
+  let space=false,drag=null,moved=false;
+  const removers=[],listen=(target,type,fn,options)=>{target.addEventListener(type,fn,options);removers.push(()=>target.removeEventListener(type,fn,options));};
+  const editing=target=>!!target?.closest?.('input,textarea,select,[contenteditable="true"]');
+  const stop=event=>{event.preventDefault();event.stopImmediatePropagation();};
+  listen(doc,'keydown',event=>{if(event.code==='Space'&&!editing(event.target)){space=true;stop(event);send({action:'space',value:true});}},true);
+  listen(doc,'keyup',event=>{if(event.code==='Space'){space=false;send({action:'space',value:false});}},true);
+  listen(doc,'pointerdown',event=>{
+    if(event.button!==0||!space||editing(event.target))return;
+    drag={id:event.pointerId,x:event.clientX,y:event.clientY};moved=false;stop(event);
+    event.target.setPointerCapture?.(event.pointerId);send({action:'pan-start'});
+  },true);
+  listen(doc,'pointermove',event=>{if(!drag||event.pointerId!==drag.id)return;const dx=event.clientX-drag.x,dy=event.clientY-drag.y;drag.x=event.clientX;drag.y=event.clientY;if(dx||dy)moved=true;stop(event);send({action:'pan',dx,dy});},true);
+  const end=event=>{if(!drag)return;drag=null;stop(event);send({action:'pan-end'});};
+  listen(doc,'pointerup',end,true);listen(doc,'pointercancel',end,true);
+  listen(doc,'click',event=>{if(moved){moved=false;stop(event);}},true);
+  listen(doc,'wheel',event=>{
+    if(event.ctrlKey||event.metaKey){stop(event);send({action:'zoom',x:event.clientX,y:event.clientY,delta:event.deltaY,mode:event.deltaMode});return;}
+    if(!frame)return;
+    // 内部列表有可滚动内容时使用原生滚动，到边界才续接外层文档。
+    const win=doc.defaultView,dx=event.deltaX,dy=event.deltaY;
+    for(let element=event.target?.nodeType===1?event.target:event.target?.parentElement;element;element=element.parentElement){
+      const style=win.getComputedStyle(element),root=element===doc.scrollingElement;
+      const y=(root||/(auto|scroll)/.test(style.overflowY))&&element.scrollHeight>element.clientHeight+1&&((dy<0&&element.scrollTop>0)||(dy>0&&element.scrollTop+element.clientHeight<element.scrollHeight-1));
+      const x=(root||/(auto|scroll)/.test(style.overflowX))&&element.scrollWidth>element.clientWidth+1&&((dx<0&&element.scrollLeft>0)||(dx>0&&element.scrollLeft+element.clientWidth<element.scrollWidth-1));
+      if(y||x)return;
+    }
+    stop(event);send({action:'scroll',dx,dy,mode:event.deltaMode});
+  },{capture:true,passive:false});
+  if(doc.defaultView)listen(doc.defaultView,'blur',()=>{space=false;drag=null;send({action:'space',value:false});send({action:'pan-end'});});
+  return ()=>removers.forEach(remove=>remove());
+}
+
 // 此函数会内嵌到原型页面，不引用模块内变量。
 export function pageBridge(config) {
   let context = {...config.context};
@@ -145,6 +179,7 @@ export function prototypeDocument(html, config) {
   if (/<head\b[^>]*>/i.test(html)) html = html.replace(/<head\b[^>]*>/i, match => match + policy);
   else if (/<html\b[^>]*>/i.test(html)) html = html.replace(/<html\b[^>]*>/i, match => match + `<head>${policy}</head>`);
   else html = `<!doctype html><html><head>${policy}</head><body>${html}</body></html>`;
-  const bridge = `<script>(${pageBridge.toString()})(${data});</script>`;
+  const gestures=config.documentCanvas?`<script>(${bindDocumentCanvasGestures.toString()})(document,data=>parent.postMessage({yuanxing:${JSON.stringify(config.token)},type:'document-canvas',...data},'*'),{frame:true});</script>`:'';
+  const bridge = gestures+`<script>(${pageBridge.toString()})(${data});</script>`;
   return /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, bridge + '</body>') : html + bridge;
 }

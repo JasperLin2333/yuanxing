@@ -676,8 +676,9 @@ export class History {
   undo(model){this.group=null;return this.past.length?this.past.pop():model;}
   clear(){this.past=[];this.group=null;}
 }
-export function markdown(text, images={}) {
+export function markdown(text, images={}, {sourceLines=false}={}) {
   const lines=String(text||'').split('\n'); let out='',list=null,table=false;
+  const lineAttribute=index=>sourceLines?` data-source-line="${index}"`:'';
   const inline=s=>{
     let result='',last=0;
     for(const m of s.matchAll(/!\[([^\]\n]*)\]\(([^)\n]+)\)|`([^`]+)`|\*\*(.+?)\*\*|\*([^*\n]+)\*/g)){
@@ -696,15 +697,15 @@ export function markdown(text, images={}) {
       if(!table){out+='<table>';table=true;}
       if(/^\s*\|[\s:|\-]+\|\s*$/.test(line))continue;
       const header=/^\s*\|[\s:|\-]+\|\s*$/.test(lines[i+1]||'');
-      out+='<tr>'+line.trim().slice(1,-1).split('|').map(c=>`<${header?'th':'td'}>${inline(c.trim())}</${header?'th':'td'}>`).join('')+'</tr>';continue;
+      out+='<tr>'+line.trim().slice(1,-1).split('|').map((c,column)=>`<${header?'th':'td'}${lineAttribute(i)}${sourceLines?` data-source-column="${column}"`:''}>${inline(c.trim())}</${header?'th':'td'}>`).join('')+'</tr>';continue;
     }
     if(table){out+='</table>';table=false;}
     const item=line.match(/^\s*(?:([-*])\s+|(\d+)\.\s+)(.*)$/);
-    if(item){const tag=item[2]?'ol':'ul';if(list!==tag){if(list)out+=`</${list}>`;out+=`<${tag}>`;list=tag;}out+=`<li>${inline(item[3])}</li>`;continue;}
+    if(item){const tag=item[2]?'ol':'ul';if(list!==tag){if(list)out+=`</${list}>`;out+=`<${tag}>`;list=tag;}out+=`<li${lineAttribute(i)}>${inline(item[3])}</li>`;continue;}
     if(list){out+=`</${list}>`;list=null;}
     const heading=line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
-    if(heading){const level=heading[1].length;out+=`<h${level}>${inline(heading[2])}</h${level}>`;continue;}
-    out+=line?`<p>${inline(line)}</p>`:'<br>';
+    if(heading){const level=heading[1].length;out+=`<h${level}${lineAttribute(i)}>${inline(heading[2])}</h${level}>`;continue;}
+    out+=line?`<p${lineAttribute(i)}>${inline(line)}</p>`:'<br>';
   }
   return out+(list?`</${list}>`:'')+(table?'</table>':'');
 }
@@ -715,7 +716,7 @@ export function readDescription(root) {
     if(el.nodeType===3)return el.textContent.replace(/\u00a0/g,' ');
     if(el.nodeType!==1||el.hasAttribute('data-upload-pending'))return '';
     const tag=el.tagName;
-    if(tag==='IMG'){const path=el.getAttribute('data-asset-path');return isImagePath(path)?`![${(el.getAttribute('alt')||'图片').replace(/[\[\]\n]/g,'')}](${path})`:'';}
+    if(tag==='IMG'){const path=el.getAttribute('data-asset-path');return isImagePath(path)?`![${(el.getAttribute('alt')??'图片').replace(/[\[\]\n]/g,'')}](${path})`:'';}
     if(tag==='BR')return '\n';
     if(tag==='STRONG'||tag==='B')return `**${children(el)}**`;
     if(tag==='EM'||tag==='I')return `*${children(el)}*`;

@@ -1,4 +1,4 @@
 interface:
   display_name: "元形 · AI 原型工作台"
   short_description: "用自然语言组织流程画布、完整原型与可自由编排的交互式需求文档"
-  default_prompt: "使用 $yuanxing，读取现有需求与原型，按功能组织可交互的需求文档，画布保留核心事项，并导出包含结构化交付数据的离线 HTML。"
+  default_prompt: "使用 $yuanxing，按本次意图讨论方案或修改原型，定位相关编辑源与需求正文，按影响读取和验证，需要分享时再导出离线 HTML。"

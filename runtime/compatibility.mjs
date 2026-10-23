@@ -131,7 +131,7 @@ export function createCompatibilityBundle(bundle) {
   return {manifest,files,yuanxing:{version:1,model,document:model.document||defaultDocument(model),documentSources:bundle.documentSources||{},images:bundle.images||{},bindings,limitations}};
 }
 
-export function compatibilityDataTag(bundle) {
-  const json=JSON.stringify(createCompatibilityBundle(bundle)).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+export function compatibilityDataTag(bundle,payload=createCompatibilityBundle(bundle)) {
+  const json=JSON.stringify(payload).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
   return `<script id="yuanxing-artifact" type="application/json">${json}</script>`;
 }

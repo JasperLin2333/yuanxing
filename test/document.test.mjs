@@ -4,7 +4,7 @@ import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
-import {defaultDocument,ensureDocument,findDocumentBlock,newDocumentBlock,moveDocumentBlock,walkDocument,extractDocumentSource,documentSourceKey} from '../runtime/document.mjs';
+import {defaultDocument,ensureDocument,findDocumentBlock,newDocumentBlock,moveDocumentBlock,walkDocument,extractDocumentSource,documentSourceKey,patchDocumentSource} from '../runtime/document.mjs';
 import {clone,validate,removeNodes,removeConnections,exportSubset,mergeProject,descriptionImagePaths,markdown,readDescription,requirementText,canvasExplanation,writeCanvasExplanation} from '../runtime/core.mjs';
 import {documentPrototypeLayout} from '../runtime/document-player.mjs';
 import {createCompatibilityBundle} from '../runtime/compatibility.mjs';
@@ -98,7 +98,38 @@ test('正文引用保护项目边界，失效章节阻止导出，单模块不�
 });
 
 test('页面和组件自动按宽度与比例显示，仍兼容已有视口数据',()=>{
-  const node={width:1280,height:800},page=documentPrototypeLayout(node,642);assert.equal(page.scale,.5);assert.equal(page.height,400);assert.equal(page.width,640);
-  const component=documentPrototypeLayout(node,402,[100,200,176,100]);assert.equal(component.width,200);assert.equal(component.height,124);assert.equal(component.left,-88);assert.equal(component.top,-188);
+  const node={width:1280,height:800},page=documentPrototypeLayout(node,642);assert.equal(page.scale,.475);assert.equal(page.height,452);assert.equal(page.width,640);
+  const component=documentPrototypeLayout(node,402,[100,200,176,100]);assert.equal(component.contentWidth,200);assert.equal(component.width,400);assert.equal(component.height,176);assert.equal(component.left,-88);assert.equal(component.top,-188);
   assert.equal(documentPrototypeLayout(node,642,null,480).height,480);
+});
+
+async function editableProject(t,text,prepare){
+  const {root,model}=await project(t),block={id:'source-edit',type:'source',path:'需求.md',section:'功能',nodes:['list']};
+  model.document={version:1,blocks:[block,{...block,id:'source-copy',omitHeading:true}]};await fs.writeFile(path.join(root,'需求.md'),text);await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));
+  await prepare?.(root);const store=await createStore(root),bundle=await store.load(),key=documentSourceKey(block);
+  return {root,block,store,bundle,key,change:(line,before,value,extra={})=>({id:block.id,key,version:bundle.documentSourceVersions[key],line,before,value,...extra})};
+}
+test('直接文字修订只替换对应行或单元格，保留 CRLF、编号、表格空白及其他章节',()=>{
+  const text='# 需求\r\n## 功能\r\n  2. **原说明**\r\n| 字段 | 说明 |\r\n| --- | --- |\r\n| 客户 | - 可选 |\r\n## 其他\r\n保持原文\r\n',block={section:'功能'};
+  const first=patchDocumentSource(text,block,{line:1,before:'**原说明**',value:'**新说明**'});assert.equal(first.text,text.replace('原说明','新说明'));
+  const cell=patchDocumentSource(first.text,block,{line:4,column:1,before:'- 可选',value:'- 必填'});assert.equal(cell.text,first.text.replace('- 可选','- 必填'));
+});
+test('源文字保存接口写回 PRD，标题改名同步引用且重新加载有效',async t=>{
+  const text='# 需求\n## 功能\n- **原说明**\n### 子章节\n原规则\n## 其他\n保持原文\n',f=await editableProject(t,text);
+  const handler=createHandler(f.store,'session'),request=Readable.from([JSON.stringify(f.change(1,'**原说明**','**新说明**'))]);Object.assign(request,{method:'PUT',url:'/api/document/source',headers:{host:'localhost:4318',authorization:'Bearer session'}});let status,result;
+  await handler(request,{writeHead(code){status=code;},end(value){result=JSON.parse(value);}});assert.equal(status,200);assert.equal(await fs.readFile(path.join(f.root,'需求.md'),'utf8'),text.replace('原说明','新说明'));
+  const renamed=await f.store.saveDocumentSource(f.change(0,'功能','功能范围',{version:result.documentSourceVersions[f.key]}));assert(renamed.model.document.blocks.every(block=>block.section==='功能范围'));
+  const reloaded=await f.store.load();assert(reloaded.documentSources[documentSourceKey(reloaded.model.document.blocks[0])].includes('**新说明**'));assert((await fs.readFile(path.join(f.root,'需求.md'),'utf8')).endsWith('## 其他\n保持原文\n'));
+});
+test('外部修改同一引用段落或切换引用时不覆盖；其他章节的独立改动保留',async t=>{
+  const text='# 需求\n## 功能\n原说明\n## 其他\n旧正文\n',f=await editableProject(t,text),file=path.join(f.root,'需求.md');
+  await fs.writeFile(file,text.replace('原说明','AI 修改'));await assert.rejects(f.store.saveDocumentSource(f.change(1,'原说明','人的修改')),error=>error.status===409);assert((await fs.readFile(file,'utf8')).includes('AI 修改'));
+  await fs.writeFile(file,text.replace('旧正文','其他章节的新正文'));await f.store.saveDocumentSource(f.change(1,'原说明','人的修改'));assert.equal(await fs.readFile(file,'utf8'),text.replace('原说明','人的修改').replace('旧正文','其他章节的新正文'));
+  await assert.rejects(f.store.saveDocumentSource(f.change(1,'人的修改','覆盖',{key:'另一份引用'})),error=>error.status===409);
+});
+test('修订含图片的原文保留实际图片路径，未授权请求不写文件',async t=>{
+  const image={nodeType:1,tagName:'IMG',hasAttribute:()=>false,getAttribute:key=>key==='data-asset-path'?'assets/rule.png':key==='alt'?'':null};assert.equal(readDescription({childNodes:[image]}),'![](assets/rule.png)');
+  const text='## 功能\n![规则](artifact/assets/rule.png) **原说明**\n',f=await editableProject(t,text,root=>fs.writeFile(path.join(root,'artifact/assets/rule.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nm9sAAAAASUVORK5CYII=','base64'))),shown=f.bundle.documentSources[f.key].split('\n')[1];
+  await f.store.saveDocumentSource(f.change(1,shown,shown.replace('原说明','新说明')));assert.equal(await fs.readFile(path.join(f.root,'需求.md'),'utf8'),text.replace('原说明','新说明'));
+  const handler=createHandler(f.store,'session'),request=Readable.from([]);Object.assign(request,{method:'PUT',url:'/api/document/source',headers:{host:'localhost:4318'}});let status;await handler(request,{writeHead(code){status=code;},end(){}});assert.equal(status,403);
 });

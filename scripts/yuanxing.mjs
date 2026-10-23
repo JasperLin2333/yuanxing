@@ -4,11 +4,6 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import {spawn,execFile} from 'node:child_process';
-import {createStore,standalone,serve} from '../runtime/server.mjs';
-import {validate,exportIssues} from '../runtime/core.mjs';
-import {readWorkspace,registerProject,serveWorkspace} from '../runtime/workspace.mjs';
-import {flowEntries} from '../runtime/player.mjs';
-import {inlineHTML} from '../runtime/resources.mjs';
 
 const home=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const help=`元形 · 用自然语言完成原型设计与流程评审
@@ -21,6 +16,7 @@ node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项
 node scripts/yuanxing.mjs workspace list --workspace <工作区.json>
 node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] [--open]
 node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
+node scripts/yuanxing.mjs locate --root <目录> [--query 关键词或页面标识] [--module 模块标识] [--limit 6] [--json]
 node scripts/yuanxing.mjs check --root <目录>
 node scripts/yuanxing.mjs serve --root <目录> [--port 4318] [--open]
 node scripts/yuanxing.mjs export --root <目录> --view review|prototype|document [--module 标识] [--flow 标识] [--out 文件.html] [--replace]
@@ -34,7 +30,7 @@ function options(args){
   const result={_:[]};
   for(let i=0;i<args.length;i++){
     const value=args[i];if(!value.startsWith('--')){result._.push(value);continue;}
-    const key=value.slice(2);if(['open','replace','diagram'].includes(key))result[key]=true;
+    const key=value.slice(2);if(['open','replace','diagram','json'].includes(key))result[key]=true;
     else{if(!args[i+1]||args[i+1].startsWith('--'))throw new Error(`缺少 --${key} 的值`);result[key]=args[++i];}
   }return result;
 }
@@ -47,6 +43,11 @@ export async function run(args,{sessionToken}={}){
   const [command,...rest]=args;
   if(!command||['help','--help','-h'].includes(command)){console.log(help);return;}
   const flags=options(rest);
+  if(command==='locate'){
+    const {locateProject,formatLocateResult}=await import('../runtime/locate.mjs');
+    const result=await locateProject(path.resolve(required(flags,'root')),{query:flags.query,module:flags.module,limit:flags.limit===undefined?6:Number(flags.limit)});
+    console.log(flags.json?JSON.stringify(result,null,2):formatLocateResult(result));return result;
+  }
   if(command==='serve'&&!process.env.YUANXING_WATCH_CHILD){
     const port=Number(flags.port||4318);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('端口应为 1～65535');
     const child=spawn(process.execPath,['--watch','--watch-preserve-output',fileURLToPath(import.meta.url),...args.filter(arg=>arg!=='--open')],{env:{...process.env,YUANXING_WATCH_CHILD:'1',YUANXING_SESSION_TOKEN:sessionToken||randomBytes(24).toString('hex')},stdio:['inherit','pipe','inherit']});
@@ -78,16 +79,21 @@ export async function run(args,{sessionToken}={}){
     console.log(`已创建 ${root}`);return;
   }
   if(command==='workspace'){
+    const {readWorkspace,registerProject}=await import('../runtime/workspace.mjs');
     const file=path.resolve(required(flags,'workspace'));
     if(flags._[0]==='list'){console.log(JSON.stringify(await readWorkspace(file),null,2));return;}
     if(flags._[0]!=='add')throw new Error('工作区操作应为 add 或 list');
     const item=await registerProject(file,{id:required(flags,'id'),title:flags.name,root:required(flags,'root'),builder:flags.builder,validator:flags.validator,extension:flags.extension});console.log(`已登记 ${item.title}（${item.id}）`);return;
   }
   if(command==='serve'&&flags.workspace){
+    const {serveWorkspace}=await import('../runtime/workspace.mjs');
     const port=Number(flags.port||4318);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('端口应为 1～65535');
     return serveWorkspace(path.resolve(flags.workspace),{port,open:!!flags.open,project:flags.project,sessionToken});
   }
-  const root=path.resolve(required(flags,'root')),store=await createStore(root,{builder:flags.builder,validator:flags.validator,extension:flags.extension});
+  const root=path.resolve(required(flags,'root'));
+  const {createStore,standalone,serve}=await import('../runtime/server.mjs');
+  const {validate,exportIssues}=await import('../runtime/core.mjs');
+  const store=await createStore(root,{builder:flags.builder,validator:flags.validator,extension:flags.extension});
   if(command==='serve'){
     const port=Number(flags.port||4318);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('端口应为 1～65535');
     await serve(root,{port,open:!!flags.open,builder:flags.builder,validator:flags.validator,extension:flags.extension,sessionToken});return;
@@ -97,6 +103,7 @@ export async function run(args,{sessionToken}={}){
     console.log(`结构与资源检查通过：${bundle.model.nodes.length} 个页面，${bundle.model.edges.length} 条关系`);return;
   }
   if(command==='export'){
+    const {flowEntries}=await import('../runtime/player.mjs');
     await store.check();const view=flags.view||'review';if(!['review','prototype','document'].includes(view))throw new Error('视图应为 review、prototype 或 document');
     const bundle=await store.load();
     if(flags.module&&!bundle.model.modules.some(m=>m.id===flags.module))throw new Error('模块不存在');
@@ -122,7 +129,7 @@ export async function run(args,{sessionToken}={}){
     if(model.nodes.some(n=>n.id===id))throw new Error('页面标识已存在');
     if(!model.modules.some(m=>m.id===moduleId))throw new Error('模块不存在');
     let content=await fs.readFile(source),width=Number(flags.width||1280),height=Number(flags.height||800);
-    if(kind==='html')content=await inlineHTML(content.toString('utf8'),source,path.dirname(source));
+    if(kind==='html'){const {inlineHTML}=await import('../runtime/resources.mjs');content=await inlineHTML(content.toString('utf8'),source,path.dirname(source));}
     else if(extension==='.png'&&content.length>=24&&!flags.width&&!flags.height){width=content.readUInt32BE(16);height=content.readUInt32BE(20);}
     else if(!flags.width||!flags.height)throw new Error('JPEG / WebP 图片请指定 --width 和 --height');
     const relative=`${kind==='html'?'pages':'assets'}/${id}${kind==='html'?'.html':extension}`,target=path.join(store.artifact,relative),siblings=model.nodes.filter(n=>n.module===moduleId);

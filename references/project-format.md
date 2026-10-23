@@ -38,6 +38,8 @@
 ## 页面与画布
 
 - `modules` 为模块，`nodes` 为页面、截图或说明。`kind` 为 `html`、`image` 或 `note`；详细说明写入 `description`，画布核心说明写入可选 `summary`，连线也支持这两个字段。`x/y` 是画布位置，`width/height` 是原页面尺寸，由 Agent 维护，不能用缩略卡片尺寸替代。
+- 节点或模块可用 `sources: ["artifact/modules/example.html", "scripts/example.mjs"]` 声明实际编辑源，路径相对项目根目录，节点声明优先。只记录已核对的源文件；生成页的 `path` 仍是预览来源，不能当作手改目标。`locate` 用现有编排与文档引用现场定位，不维护另一份索引。
+- `locate --root <目录> --query <关键词>` 默认输出页面、去重编辑源及正文行号；`--module`、`--limit` 可收窄范围。需要 `preview`、`render` 等完整元数据时加 `--json`，返回原有结构化结果。定位和 `help` 不载入服务或布线引擎。
 - `canvasType: "pc" | "mobile"` 只决定卡片类型。移动 HTML 可按尺寸自动识别。
 - `canvas: false` 将仍需播放的操作状态与画布展示分开，不出现在画布或回收站，导出时保留；Agent 可用它保存交互需要的中间状态。
 - `overview: false` 且未设置 `canvas: false` 的普通节点进入回收站；导出时排除这些节点及关联连线、批注与专属资源。仍需在原型中跳转的状态应同时设置 `canvas: false`；需要归并到可见页面时使用 `overviewAlias`。
@@ -96,11 +98,12 @@ HTML 批注可增加 `selector` 和 `offset: [0.5,0.5]` 以跟随元素，`point
 ```sh
 node "<Skill目录>/scripts/yuanxing.mjs" add --root "<项目目录>" --source "旧页面.html" --id old-page --title "已有页面"
 node "<Skill目录>/scripts/yuanxing.mjs" connect --root "<项目目录>" --from old-page --to next-page --selector "#submit" --label "提交"
-node "<Skill目录>/scripts/yuanxing.mjs" check --root "<项目目录>"
 node "<Skill目录>/scripts/yuanxing.mjs" export --root "<项目目录>" --view prototype --flow assignment
 ```
 
 `add` 复制输入并内嵌直接资源，不改输入原件。PNG 可读取原尺寸；JPEG / WebP 需显式给出宽高。命令通过文件版本核对保存；外部修改冲突时停止，重新读取后再落实当前范围。
+
+`export` 已包含结构、资源及已配置的项目校验，不必先重复运行 `check`。本轮只需检查而不导出时，才单独使用 `check --root "<项目目录>"`。
 
 ## 并行编辑与自动更新
 

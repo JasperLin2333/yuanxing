@@ -38,26 +38,26 @@ let zoomSensitivity=3.5;try{const saved=Number(localStorage.getItem('yuanxing-zo
 let camera={x:30,y:30,scale:0.8},pageScale=1,noteFit=true,cameras={},positions={},frames={},missing=new Set(),inputGroup=null;
 const history=new History();
 let experience=boot.view==='prototype',activeFlow=null,experienceReturn=null;
-let documentMode=boot.view==='document',documentFrameScope=null;
+let documentMode=boot.view==='document';
 let imagePreviewStack=[];
 const originalReadonly=readonly;
-const projectExtension=createProjectExtension({getState:()=>documentFrameScope||({model,frames,current,mode,pageScale,experience,n:node(current)}),node,openNode,measure,visibleRect,renderOverlays,renderInspector,download,exitExperience});
+const extensionHost={getState:()=>({model,frames,current,mode,pageScale,experience,n:node(current)}),node,openNode,measure,visibleRect,renderOverlays,renderInspector,download,exitExperience};
+const projectExtension=createProjectExtension(extensionHost);
 document.body.classList.toggle('declarative-pages',!!projectExtension?.declarative);
 const library=createLibrary({getModel:()=>model,getModule:()=>moduleId,getCurrent:()=>current,getSelected:()=>selected,getRecycleOpen:()=>recycleOpen,openRecycle,readonly,locateNode,selectModule,addModule,removeModule,moveModule});
 const libraryStyle=document.createElement('style');libraryStyle.textContent=libraryStyles+(projectExtension?.styles||'');document.head.append(libraryStyle);
 installControlTooltips();
 const pendingImages=new Set(),pendingDescriptionNodes=new Set(),richText=text=>markdown(text,bundle?.images||{});
-const documentView=createDocumentView({root:$('#document-view'),model:()=>model,bundle:()=>bundle,readonly:originalReadonly,change:fn=>edit(fn),changeText:fn=>editField(fn),markdown:richText,read:readDescription,explanation:explanationText,writeExplanation,notice,
-  async upload(file){const job=uploadImage(file);pendingImages.add(job);try{const image=await job;bundle.images??={};bundle.images[image.path]=image.src;return image;}finally{pendingImages.delete(job);}},
-  mountPrototype:(n,viewport,block)=>mountDocumentPrototype({model:()=>model,bundle:()=>bundle,extension:projectExtension,scope(state,fn){const previous=documentFrameScope;documentFrameScope=state;try{return fn();}finally{documentFrameScope=previous;}}},n,viewport,block)
+const documentView=createDocumentView({root:$('#document-view'),model:()=>model,bundle:()=>bundle,readonly:originalReadonly,changeText:fn=>editField(fn),markdown:richText,sourceMarkdown:text=>markdown(text,bundle?.images||{},{sourceLines:true}),read:readDescription,explanation:explanationText,writeExplanation,notice,saveSource:saveDocumentText,
+  mountPrototype:(n,viewport,block,options)=>mountDocumentPrototype({model:()=>model,bundle:()=>bundle,createExtension:overrides=>createProjectExtension({...extensionHost,...overrides}),...options},n,viewport,block)
 });
 function openDocument(){if(documentMode)return;if(experience)exitExperience();if(devMode)toggleDeveloperMode(false);closeAnnotationEditor();cancelConnection?.();saveCanvasCamera();stopPreviews();$('#nodes').replaceChildren();$('#page-stage').replaceChildren();frames={};documentMode=true;documentView.enter();renderAll();}
 let panels={sidebar:true,inspector:!matchMedia('(max-width:720px)').matches};
 try{const saved=JSON.parse(localStorage.getItem('yuanxing-panels')||'null');if(saved)for(const key of Object.keys(panels))if(typeof saved[key]==='boolean')panels[key]=saved[key];}catch{/* 文件分享页可能禁用本地偏好存储。 */}
 function renderPanels(){
-  const layout=$('.layout');for(const [key,open] of Object.entries(panels)){layout.classList.toggle(`${key}-collapsed`,!open);$('#'+key).hidden=!open;const button=document.querySelector(`[data-action="panel-${key}"]`),label=(open?'收起':'展开')+(key==='sidebar'?'模块目录':'页面说明');button.setAttribute('aria-expanded',String(open));button.setAttribute('aria-label',label);button.title=label;}
+  const layout=$('.layout');for(const [key,open] of Object.entries(panels)){layout.classList.toggle(`${key}-collapsed`,!open);$('#'+key).hidden=!open;const isOutline=documentMode&&key==='sidebar',visible=isOutline?documentView.isOutlineOpen():open,button=document.querySelector(`[data-action="panel-${key}"]`),label=(visible?'收起':'展开')+(key==='sidebar'?(isOutline?'文档目录':'模块目录'):'页面说明');button.setAttribute('aria-expanded',String(visible));button.setAttribute('aria-controls',isOutline?'yuanxing-document-outline':key);button.setAttribute('aria-label',label);button.title=label;}
 }
-function togglePanel(key){if(panels[key]&&$('#'+key).contains(document.activeElement))document.querySelector(`[data-action="panel-${key}"]`).focus();panels[key]=!panels[key];renderPanels();try{localStorage.setItem('yuanxing-panels',JSON.stringify(panels));}catch{}resizePage();}
+function togglePanel(key){if(documentMode&&key==='sidebar'){documentView.toggleOutline();renderPanels();return;}if(panels[key]&&$('#'+key).contains(document.activeElement))document.querySelector(`[data-action="panel-${key}"]`).focus();panels[key]=!panels[key];renderPanels();try{localStorage.setItem('yuanxing-panels',JSON.stringify(panels));}catch{}resizePage();}
 function installControlTooltips(){
   const tip=document.createElement('div');tip.id='control-tooltip';tip.className='control-tooltip';tip.setAttribute('role','tooltip');tip.hidden=true;document.body.append(tip);let target=null,timer=null,nativeTitle=null;
   const hide=()=>{clearTimeout(timer);tip.hidden=true;if(target){if(nativeTitle!==null&&!target.hasAttribute('title'))target.setAttribute('title',nativeTitle);const refs=(target.getAttribute('aria-describedby')||'').split(/\s+/).filter(id=>id&&id!==tip.id);if(refs.length)target.setAttribute('aria-describedby',refs.join(' '));else target.removeAttribute('aria-describedby');}target=null;nativeTitle=null;};
@@ -144,6 +144,18 @@ async function save(){
   })();return saveFlight;
 }
 async function reload(render=true){const r=await fetch(apiBase+'/api/project');if(!r.ok)throw new Error(await r.text());bundle=await r.json();model=bundle.model;baseModel=clone(model);flowContext=clone(model.contextDefaults||{});revision=bundle.revision;dirty=conflict=false;conflictData=null;history.clear();updateHistoryButtons();$('#message').hidden=true;moduleId=model.modules.some(m=>m.id===moduleId)?moduleId:model.entryModule||model.modules[0]?.id;if(render)renderAll();}
+async function saveDocumentText(change){
+  if(originalReadonly)throw new Error('请在本地工作台修改需求正文。');
+  if(saveFlight)await saveFlight;await save();if(dirty||conflict)throw new Error('工作台修改尚未保存，请先处理保存提示。');
+  const baseline=clone(model),response=await fetch(apiBase+'/api/document/source',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(change)}),data=await response.json();
+  if(!response.ok)throw new Error(data.error||'文字未保存');
+  Object.assign(bundle.documentSources,data.documentSources);Object.assign(bundle.documentSourceVersions,data.documentSourceVersions);
+  for(const [before,after] of Object.entries(data.keyChanges))if(before!==after){delete bundle.documentSources[before];delete bundle.documentSourceVersions[before];}
+  const combined=mergeProject(baseline,model,data.model);baseModel=clone(data.model);revision=data.revision;
+  if(combined.conflicts.length)showCollaborationConflict({model:data.model,revision,conflicts:combined.conflicts},model,baseline);
+  else{if(JSON.stringify(baseline)!==JSON.stringify(data.model))history.clear();model=combined.model;bundle.model=model;dirty=JSON.stringify(model)!==JSON.stringify(baseModel);if(dirty)scheduleSave();}
+  updateHistoryButtons();if(!conflict&&$('#message').dataset.kind==='save')$('#message').hidden=true;return data;
+}
 function sidebar(){
   $('#project-title').textContent=model.title;$('#module-title').textContent=recycleOpen?'回收站':model.modules.find(m=>m.id===moduleId)?.title||'';
   library.renderSidebar($('#sidebar'));
@@ -632,7 +644,7 @@ function zoom(factor,event){
 }
 
 function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-async function exportFile(scope,view='review'){if(exporting)return;if(conflict)return;exporting=true;closeMenus();const trigger=$('#export-trigger');trigger.disabled=true;trigger.firstChild.textContent='导出中… ';try{if(pendingImages.size)await Promise.all([...pendingImages]);if(saveFlight)await saveFlight;await save();if(dirty){if($('#message').hidden)notice('修改尚未保存，请重试。',[['重试',save]],'save');return;}const r=await fetch(apiBase+'/api/export',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({module:scope==='module'?moduleId:null,entryModule:moduleId,view})});if(!r.ok){notice((await r.json()).error);return;}download(await r.text(),`${model.title}-${scope==='module'?model.modules.find(m=>m.id===moduleId)?.title+'-':''}${view==='prototype'?'独立原型':view==='document'?'需求文档':'评审工作台'}.html`,'text/html');}finally{exporting=false;trigger.disabled=false;trigger.firstChild.textContent='导出 HTML ';}}
+async function exportFile(view='review'){if(exporting||conflict)return;exporting=true;closeMenus();const trigger=$('#export-trigger');trigger.disabled=true;trigger.firstChild.textContent='导出中… ';try{await documentView.flush();if(pendingImages.size)await Promise.all([...pendingImages]);if(saveFlight)await saveFlight;await save();if(dirty||conflict){if($('#message').hidden)notice('修改尚未保存，请重试。',[['重试',save]],'save');return;}const r=await fetch(apiBase+'/api/export',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({module:null,entryModule:moduleId,view})});if(!r.ok){notice((await r.json()).error);return;}download(await r.text(),`${model.title}-${view==='prototype'?'完整原型':view==='document'?'需求文档':'完整评审台'}.html`,'text/html');}finally{exporting=false;trigger.disabled=false;trigger.firstChild.textContent='导出 HTML ';}}
 const imageTypes=['image/png','image/jpeg','image/webp'];
 function clipboardImages(event){const files=[...(event.clipboardData?.files||[])];return files.length?files:[...(event.clipboardData?.items||[])].filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);}
 async function uploadImage(file){
@@ -691,7 +703,7 @@ function toggleDeveloperMode(force){
   const next=force??!devMode,id=current,frame=frames[id],doc=frame?.contentDocument;
   devSnapshot=next&&doc?{id,html:handoffClean(doc.documentElement).outerHTML}:null;
   devMode=next;devPicker?.destroy();devPicker=null;devElement=null;mode=null;closeAnnotationEditor();$('#handoff-menu').open=false;
-  document.body.classList.toggle('handoff-mode',devMode);document.querySelector('[data-action="developer-mode"]').setAttribute('aria-pressed',String(devMode));
+  document.body.classList.toggle('handoff-mode',devMode);document.querySelectorAll('[data-action="developer-mode"]').forEach(button=>button.setAttribute('aria-pressed',String(devMode)));$('#handoff-indicator').hidden=!devMode;
   if(next&&frame?.dataset.yxReady==='true'&&node(id)?.kind==='html'){
     devOriginal={id,frame};frame.hidden=true;renderOverlays();
     mountHandoffPreview();if(!doc&&frame.dataset.bridge)frame.contentWindow.postMessage({yuanxing:frame.dataset.bridge,type:'handoff-snapshot'},'*');
@@ -719,7 +731,7 @@ async function copyHandoff(text){
   const field=document.createElement('textarea');field.value=text;field.style.cssText='position:fixed;opacity:0';document.body.append(field);field.select();try{if(!document.execCommand('copy'))throw new Error('复制失败，请下载片段 HTML。');}finally{field.remove();}
 }
 async function action(name){
-  switch(name){case 'document':openDocument();break;case 'export-document':await exportFile('all','document');break;case 'developer-mode':toggleDeveloperMode();break;case 'handoff-copy':{const {snippet,context}=selectedHandoff();await copyHandoff(handoffPrompt(snippet,context));break;}case 'handoff-html':await copyHandoff(selectedHandoff().snippet.html);break;case 'handoff-download':{const {snippet,context}=selectedHandoff();download(handoffDocument(snippet,context),(context.title+'-片段.html').replace(/[\\/:*?"<>|]/g,'-'),'text/html');break;}case 'experience':if(devMode)toggleDeveloperMode(false);if(!experience)startExperience();break;case 'experience-exit':exitExperience();break;case 'export-prototype':await exportFile('all','prototype');break;case 'image':replaceImage=null;closeMenus();$('#image-input').multiple=true;$('#image-input').click();break;case 'replace-image':chooseImageReplacement($('#node-image-menu').dataset.node);break;case 'replace-current-image':chooseImageReplacement(current);break;case 'confirm-image-replacement':{const pending=pendingImageReplacement;if(readonly||!pending)break;$('#image-replace-dialog').close();pendingImageReplacement=null;if(node(pending.id)?.path!==pending.path){notice('当前图片已改变，请重新粘贴后替换。');break;}await upload(pending.files,{replacement:pending.id,expectedPath:pending.path});break;}case 'cancel-image-replacement':$('#image-replace-dialog').close();pendingImageReplacement=null;break;case 'note':addNote();break;case 'canvas-menu':canvasMenu();break;case 'export-menu':exportMenu();break;
+  switch(name){case 'document':openDocument();break;case 'export-document':await exportFile('document');break;case 'developer-mode':toggleDeveloperMode();break;case 'handoff-copy':{const {snippet,context}=selectedHandoff();await copyHandoff(handoffPrompt(snippet,context));break;}case 'handoff-html':await copyHandoff(selectedHandoff().snippet.html);break;case 'handoff-download':{const {snippet,context}=selectedHandoff();download(handoffDocument(snippet,context),(context.title+'-片段.html').replace(/[\\/:*?"<>|]/g,'-'),'text/html');break;}case 'experience':if(devMode)toggleDeveloperMode(false);if(!experience)startExperience();break;case 'experience-exit':exitExperience();break;case 'export-prototype':await exportFile('prototype');break;case 'image':replaceImage=null;closeMenus();$('#image-input').multiple=true;$('#image-input').click();break;case 'replace-image':chooseImageReplacement($('#node-image-menu').dataset.node);break;case 'replace-current-image':chooseImageReplacement(current);break;case 'confirm-image-replacement':{const pending=pendingImageReplacement;if(readonly||!pending)break;$('#image-replace-dialog').close();pendingImageReplacement=null;if(node(pending.id)?.path!==pending.path){notice('当前图片已改变，请重新粘贴后替换。');break;}await upload(pending.files,{replacement:pending.id,expectedPath:pending.path});break;}case 'cancel-image-replacement':$('#image-replace-dialog').close();pendingImageReplacement=null;break;case 'note':addNote();break;case 'canvas-menu':canvasMenu();break;case 'export-menu':exportMenu();break;
     case 'undo':if(!readonly&&history.past.length){model=history.undo(model);dirty=true;selected=null;updateHistoryButtons();scheduleSave();renderAll();}break;
     case 'fit':fit();break;case 'zoom-in':zoom(1.15);break;case 'zoom-out':zoom(1/1.15);break;
     case 'panel-sidebar':togglePanel('sidebar');break;case 'panel-inspector':togglePanel('inspector');break;
@@ -728,10 +740,10 @@ async function action(name){
     case 'annotate':startAnnotation();break;
     case 'image-preview-back':backFromImagePreview();break;
     case 'overview':current=null;selected=null;mode=null;renderAll();$('#canvas-viewport').focus({preventScroll:true});break;
-    case 'export-module':await exportFile('module');break;case 'export-all':await exportFile('all');break;
+    case 'export-all':await exportFile();break;
   }
 }
-document.addEventListener('click',event=>{const target=event.target.closest('[data-action]');if(target&&!(readonly&&['image','note','annotate','canvas-menu','export-menu','undo','export-module','export-all'].includes(target.dataset.action)))action(target.dataset.action).catch(error=>notice(error.message));});
+document.addEventListener('click',event=>{const target=event.target.closest('[data-action]');if(target&&!(readonly&&['image','note','annotate','canvas-menu','export-menu','undo','export-all'].includes(target.dataset.action)))action(target.dataset.action).catch(error=>notice(error.message));});
 $('#export-menu').addEventListener('pointerenter',()=>exportMenu());$('#export-menu').addEventListener('pointerleave',()=>{exportCloseTimer=setTimeout(()=>{if(!$('#export-menu').contains(document.activeElement))closeMenus();},160);});
 document.addEventListener('pointerdown',event=>{if(!event.target.closest('#export-menu,#canvas-add-menu,#canvas-add-trigger,#node-image-menu,[aria-controls="node-image-menu"]')){closeMenus();insertPoint=null;}});
 document.addEventListener('pointerdown',dismissZoomSettings,true);
@@ -787,7 +799,7 @@ document.addEventListener('keydown',event=>{if(devMode&&event.key==='Escape'){ev
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();if(!panels.sidebar)togglePanel('sidebar');library.focusSearch();return;}
   if(!readonly&&!current&&selectedNodeIds().length&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&['Delete','Backspace'].includes(event.key)){event.preventDefault();deleteSelectedNodes();return;}
   if((event.ctrlKey||event.metaKey)&&!event.shiftKey&&event.key.toLowerCase()==='z'&&!readonly){event.preventDefault();activeCanvasGesture?.();action('undo');return;}if(!readonly&&!current&&!linesHidden&&selected?.type==='edge'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&['Delete','Backspace'].includes(event.key)){event.preventDefault();deleteSelectedConnection();}});
-window.addEventListener('beforeunload',event=>{saveView();const draft=annotationEditor?.querySelector('textarea');if(dirty||pendingImages.size||draft&&draft.value!==(model.annotations.find(a=>a.id===annotationEditorId)?.text||'')){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{saveView();const draft=annotationEditor?.querySelector('textarea');if(dirty||documentView.hasPendingChanges()||pendingImages.size||draft&&draft.value!==(model.annotations.find(a=>a.id===annotationEditorId)?.text||'')){event.preventDefault();event.returnValue='';}});
 window.addEventListener('blur',()=>cancelConnection?.());
 window.addEventListener('resize',resizePage);
 $('#page-viewport').addEventListener('scroll',positionAnnotationEditor,{passive:true});

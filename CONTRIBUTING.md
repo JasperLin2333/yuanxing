@@ -6,10 +6,9 @@ README 面向元形的使用者，介绍原型设计、流程体验、交付方�
 
 通用 Skill 维护在 `SKILL.md`，共享运行时维护在 `runtime/`。项目页面与专用交互随项目保存，通过显式扩展使用同一内核；格式与扩展约定见[项目格式](references/project-format.md#项目扩展)。
 
-```sh
-npm test
-npm run check
-```
+维护工具源码时按[本次行为选择验证范围](references/agent-adaptation.md#按影响验证)，例如 `node --test --test-reporter=dot test/locate.test.mjs`。保存合并、共享协议、分发或关联回归受影响，以及发布版本前，才扩大至 `npm test`；修改多个文件本身不要求全量回归。成功输出精简，失败保留报错；`npm run check` 只在公开示例受影响时使用。
+
+普通项目的原型与需求修改按影响检查语法、引用及正文一致性，不执行本仓库全部测试，不自动刷新所有演示或打包所有渠道。
 
 示例源在 `examples/product-iteration/`，更新公开演示前核对源项目，再重新导出：
 

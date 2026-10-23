@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs runtime/routing.test.mjs",
+    "test": "node --test --test-reporter=dot test/*.test.mjs runtime/routing.test.mjs",
     "check": "node scripts/yuanxing.mjs check --root examples/product-iteration",
     "pack": "node scripts/pack.mjs",
     "pack:workbuddy": "node scripts/pack.mjs --target workbuddy",
