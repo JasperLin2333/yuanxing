@@ -8,7 +8,7 @@
 
 已有 PRD 先交代其背景、目标及本期功能，再展开对应模块。长说明用纵向正文，短说明与控件可左右对照，字段或条件比较再用表格；不统一套双栏。已有细化内容引用到所属章节，不压缩成画布摘要。画布的 `summary` 与详细 `description`／`rules` 分开；未设置摘要的旧对象仍读取原说明，编辑画布只保存摘要，不抹去原细节。
 
-左侧目录自动按正文标题和引用 PRD 的子标题生成，点击定位到对应章节，滚动时高亮当前阅读位置。修改、移动或删除标题后同步目录，不另存一份导航内容。通过左上角与画布相同的侧栏图标收起或展开；窄屏默认收起。本地工作台与离线 HTML 均保留此定位能力。
+左侧目录自动按正文标题和引用 PRD 的子标题生成，点击定位到对应章节，滚动时高亮当前阅读位置。修改、移动或删除标题后同步目录，不另存一份导航内容。通过左上角与画布相同的侧栏图标收起或展开；窄屏默认收起。本地工作台与离线 HTML 均保留此定位能力。 同级标题使用相同缩进，引用 PRD 与自由编排标题共用同一层级。刷新或切换视图后返回文档，恢复原章节、段内位置、目录滚动及展开状态；章节重编号时按标题内容继续定位。
 
 ```json
 {
@@ -70,9 +70,9 @@ HTML 使用真实输入、选择器、Tabs 和浮层。每个嵌入项有独立�
 node "<Skill目录>/scripts/yuanxing.mjs" export --root "<项目目录>" --view document
 ```
 
-默认输出 `dist/document.html`。画布、完整原型和需求文档的导出都包含三个视图，打开时进入所选视图。导出文件只读；原型局部交互仍可体验，文档正文继续在项目源编辑。
+默认输出 `dist/document.html`。画布、完整原型和需求文档的导出都包含三个视图，打开时进入所选视图。导出文件只读；原型局部交互仍可体验，文档正文继续在项目源编辑。数据默认无损压缩，解压器随 HTML 内嵌，离线打开无需联网或另选导出模式；小数据或压缩后未减小的数据保持原格式。CLI 同时输出实际 MB（1 MB = 1,000,000 字节）与字节数。
 
-所有导出均提供可直接解析的入口，无需执行文件中的 JavaScript：
+所有导出均提供静态数据入口，无需执行文件中的 JavaScript。先解析 JSON；未压缩时直接得到 `manifest/files/yuanxing`：
 
 ```html
 <script id="yuanxing-artifact" type="application/json">
@@ -80,11 +80,22 @@ node "<Skill目录>/scripts/yuanxing.mjs" export --root "<项目目录>" --view 
 </script>
 ```
 
+压缩时同一数据块保存 `{"encoding":"gzip-base64","data":"..."}`。读取方先 Base64 解码并 gunzip，再解析 UTF-8 JSON，得到相同的完整字段。Node 示例（`text` 为该数据块正文）：
+
+```js
+import {gunzipSync} from 'node:zlib';
+let artifact=JSON.parse(text);
+if(artifact.encoding==='gzip-base64')artifact=JSON.parse(gunzipSync(Buffer.from(artifact.data,'base64')).toString('utf8'));
+const {manifest,files,yuanxing}=artifact;
+```
+
+既有只做一次 `JSON.parse` 的读取方须增加上述解码；仍可静态提取，不运行 HTML。Skill 内也可使用 `runtime/export-data.mjs` 的 `decodeExportArtifact(artifact, gunzipSync)`。原生播放器在启动前自动解压并还原，图片、页面、规则及交互数据不变。
+
 - `manifest.requirements[]` 包含 `id/title/states/transitions/logic`；每组恰好一个初始状态。状态的 `html` 指向 `files` 中的相对路径。
 - `files` 保存已内嵌资源的状态 HTML，常规跳转绑定实际元素的 `data-transition-id`，说明绑定 `data-logic-id`，组件原有身份标记保留。
 - 实际相连的跨模块页面放入同一组，以保留基础协议只能在组内跳转的约束；纯画布关系不转换为可执行操作。
 - `yuanxing.model/document/documentSources/images` 保留原生结构、自由正文、选中源章节和图片；源章节及独立规则也进入基础 `logic`，`nodes` 对应的正文关联到指定页面。`bindings` 保留选择器、条件与上下文变化。原生播放器继续读取 `YUANXING_BOOT`，展示和交互不受兼容字段限制。
-- 导出时，`YUANXING_BOOT.sharedStrings` 可用文件名和字符串范围引用 `files` 中已有的图片、页面及公共片段；离线启动先无损还原，再交给播放器。外部工具继续直接读取上述 `yuanxing-artifact` JSON，`manifest/files` 不压缩、不替换为共享引用；无需执行页面脚本或升级解析器。
+- 导出时，`YUANXING_BOOT.sharedStrings` 可用文件名和字符串范围引用 `files` 中已有的图片、页面及公共片段；离线启动先解压上述数据，再无损还原并交给播放器。解码后的 `manifest/files` 保持完整，不替换为资源占位符。
 - 基础协议没有条件分支：这类控件只标关联逻辑，并在 `data-yuanxing-transition-ids`、`bindings` 中保留全部候选目标；不假设一个固定目标。超出基础格式、无法静态匹配的选择器或缺失控件写入 `limitations`。
 - 转换支持稳定的标签、ID、class、属性、后代/子元素及常用位置选择器。源中不能直接静态解析的选择器留给原生绑定，不凭近似元素补标记。
 

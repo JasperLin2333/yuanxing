@@ -371,7 +371,7 @@ export function restoreView(model,saved) {
   const validCamera=value=>value&&[value.x,value.y,value.scale].every(Number.isFinite)&&value.scale>0&&value.scale<=4;
   const moduleId=model.modules.some(m=>m.id===saved.moduleId)?saved.moduleId:model.entryModule||model.modules[0]?.id;
   const current=model.nodes.some(n=>n.id===saved.current&&!isBranch(n))?saved.current:null;
-  return {moduleId,current,camera:validCamera(saved.camera)&&moduleId===saved.moduleId?saved.camera:null,cameras:Object.fromEntries(model.modules.filter(m=>validCamera(saved.cameras?.[m.id])).map(m=>[m.id,saved.cameras[m.id]])),flowContext:isFlowContext(saved.flowContext)?saved.flowContext:clone(model.contextDefaults||{}),linesHidden:saved.linesHidden===true};
+  return {moduleId,current,camera:validCamera(saved.camera)&&moduleId===saved.moduleId?saved.camera:null,cameras:Object.fromEntries(model.modules.filter(m=>validCamera(saved.cameras?.[m.id])).map(m=>[m.id,saved.cameras[m.id]])),flowContext:isFlowContext(saved.flowContext)?saved.flowContext:clone(model.contextDefaults||{}),linesHidden:saved.linesHidden===true,view:['review','document','prototype'].includes(saved.view)?saved.view:null,activeFlow:typeof saved.activeFlow==='string'?saved.activeFlow:null,documentPosition:saved.documentPosition&&typeof saved.documentPosition==='object'?saved.documentPosition:null};
 }
 export const isImagePath = value => typeof value==='string' && /^assets\/[^?#\\\u0000-\u001f]+\.(png|jpe?g|webp)$/i.test(value) && value.split('/').every(part=>part&&part!=='.'&&part!=='..');
 export function requirementText(model,owner) {

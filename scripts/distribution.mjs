@@ -1,7 +1,7 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 
-const RENAMED=new Map(['LICENSE','LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE'].map(name=>[name,name+'.txt']));
+const RENAMED=new Map(['LICENSE','LIBAVOID-LICENSE','DRAWIO-LICENSE','DRAWIO-NOTICE','FFLATE-LICENSE'].map(name=>[name,name+'.txt']));
 const supported=new Set(['generic','skillhub','workbuddy']);
 async function exists(file){try{await fs.access(file);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}}
 function references(text){

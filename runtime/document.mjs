@@ -200,7 +200,8 @@ export function createDocumentOutline({root,paper,nav,toolbar}) {
       if(disposed)return;
       const scroll=nav.scrollTop;
       const headings=[...paper.querySelectorAll('h1,h2,h3,h4,h5,h6')].filter(heading=>!heading.classList.contains('doc-title')&&heading.textContent.trim());
-      const levels=headings.map(heading=>Number(heading.dataset.docHeadingLevel)||Number(heading.tagName.slice(1))),base=Math.min(...levels);
+      // 自建标题与引用正文统一按实际 H1～H6 层级计算，避免两套起算值混用。
+      const levels=headings.map(heading=>Number(heading.tagName.slice(1))),base=Math.min(...levels);
       nav.replaceChildren();current=null;
       entries=headings.map((target,index)=>{
         const control=document.createElement('button');control.type='button';control.className='doc-outline-link';control.textContent=target.textContent.trim();control.title=control.textContent;control.style.paddingLeft=(12+Math.min(4,levels[index]-base)*14)+'px';
@@ -212,6 +213,17 @@ export function createDocumentOutline({root,paper,nav,toolbar}) {
       if(!entries.length){const empty=document.createElement('p');empty.className='doc-outline-empty';empty.textContent='暂无章节标题';nav.append(empty);}
       track();nav.scrollTop=scroll;
     },
+    capture(){
+      track();const title=current?.target.textContent.trim(),same=entries.filter(entry=>entry.target.textContent.trim()===title);
+      return {heading:title,occurrence:same.indexOf(current),offset:current?current.target.getBoundingClientRect().top-root.getBoundingClientRect().top:0,scrollTop:root.scrollTop,outlineScroll:nav.scrollTop};
+    },
+    restore(position){
+      if(!position||disposed)return;
+      const title=text=>String(text||'').replace(/^\d+(?:\.\d+)*\s+/,''),exact=entries.filter(entry=>entry.target.textContent.trim()===position.heading),matches=exact.length?exact:entries.filter(entry=>title(entry.target.textContent.trim())===title(position.heading)),entry=matches[Math.max(0,position.occurrence||0)]||matches[0];
+      const top=entry&&Number.isFinite(position.offset)?entry.target.getBoundingClientRect().top-root.getBoundingClientRect().top+root.scrollTop-position.offset:position.scrollTop;
+      if(Number.isFinite(top))root.scrollTo({top:Math.max(0,top),behavior:'instant'});
+      track();if(Number.isFinite(position.outlineScroll))nav.scrollTop=Math.max(0,position.outlineScroll);
+    },
     refresh(){current=null;schedule();},
     dispose(){disposed=true;observer?.disconnect();if(pending!==null)cancelAnimationFrame(pending);root.removeEventListener('scroll',schedule);window.removeEventListener('resize',schedule);}
   };
@@ -219,7 +231,7 @@ export function createDocumentOutline({root,paper,nav,toolbar}) {
 
 export function createDocumentView(host) {
   const root=host.root,cache=new Map(),bindings=new Set(),drafts=new Map();
-  let active=false,signature='',outline,sourceTimer,sourceFlight;
+  let active=false,signature='',outline,sourceTimer,sourceFlight,readingPosition=null,restoreFrame=null;
   let outlineOpen=typeof matchMedia!=='function'||!matchMedia('(max-width:700px)').matches;
   const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
   const fieldChanged=callback=>host.changeText(model=>{ensureDocument(model);callback(model);});
@@ -287,6 +299,7 @@ export function createDocumentView(host) {
     if(!active||drafts.size||sourceFlight)return;
     const model=host.model(),doc=model.document||defaultDocument(model),next=JSON.stringify([doc,model.nodes.map(node=>[node.id,node.title,node.description,node.rule]),model.rules,model.edges,host.bundle().sourcesSignature,host.bundle().documentSourceVersions]);
     if(signature===next)return;signature=next;
+    readingPosition=outline?.capture()||readingPosition;
     const scroll=root.scrollTop,outlineScroll=root.querySelector('.doc-outline-list')?.scrollTop||0,used=new Set();walkDocument(doc.blocks,block=>used.add(block.id));for(const [id,entry] of cache)if(!used.has(id)){entry.dispose?.();cache.delete(id);}
     outline?.dispose();bindings.clear();root.replaceChildren();
     const sidebar=el('aside','doc-outline'),nav=el('nav','doc-outline-list');sidebar.id='yuanxing-document-outline';sidebar.setAttribute('aria-label','需求文档目录');nav.setAttribute('aria-label','章节定位');sidebar.append(el('div','doc-outline-title','目录'),nav);sidebar.hidden=!outlineOpen;root.classList.toggle('doc-outline-collapsed',!outlineOpen);
@@ -294,11 +307,14 @@ export function createDocumentView(host) {
     editable(heading,()=>fieldChanged(model=>model.document.title=heading.textContent),{inline:true});
     paper.append(heading,list(doc,'@document'));main.append(paper);root.append(sidebar,main);root.scrollTop=scroll;
     outline=createDocumentOutline({root,paper,nav});outline.update();nav.scrollTop=outlineScroll;
+    if(readingPosition){const position=readingPosition;if(restoreFrame!==null)cancelAnimationFrame(restoreFrame);restoreFrame=requestAnimationFrame(()=>{restoreFrame=null;if(active)outline?.restore(position);});}
   }
   function clearView(){outline?.dispose();outline=null;bindings.clear();for(const entry of cache.values())entry.dispose?.();cache.clear();root.replaceChildren();signature='';}
   return {render,flush:flushSources,hasPendingChanges:()=>!!drafts.size||!!sourceFlight,isOutlineOpen:()=>outlineOpen,
+    capturePosition(){return active&&outline?{...outline.capture(),outlineOpen}:readingPosition;},
+    restorePosition(position){if(!position||typeof position!=='object')return;readingPosition=position;if(typeof position.outlineOpen==='boolean')outlineOpen=position.outlineOpen;if(active)outline?.restore(position);},
     toggleOutline(){outlineOpen=!outlineOpen;root.classList.toggle('doc-outline-collapsed',!outlineOpen);const sidebar=root.querySelector('.doc-outline');if(sidebar)sidebar.hidden=!outlineOpen;outline?.refresh();},
-    enter(){active=true;if(drafts.size||sourceFlight){outline?.refresh();return;}signature='';render();},leave(){active=false;clearTimeout(sourceTimer);if(drafts.size||sourceFlight){flushSources().catch(reportSourceError);return;}clearView();},
+    enter(){active=true;if(drafts.size||sourceFlight){outline?.refresh();return;}signature='';render();},leave(){readingPosition=outline?{...outline.capture(),outlineOpen}:readingPosition;active=false;if(restoreFrame!==null)cancelAnimationFrame(restoreFrame);restoreFrame=null;clearTimeout(sourceTimer);if(drafts.size||sourceFlight){flushSources().catch(reportSourceError);return;}clearView();},
     isBusy(){return !!drafts.size||!!sourceFlight||root.contains(document.activeElement)&&document.activeElement?.matches('[contenteditable],input,select')||[...cache.values()].some(entry=>entry.isBusy?.());}
   };
 }

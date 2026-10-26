@@ -18,9 +18,22 @@ function fixture(t){
 
 test('目录包含正文与引用章节的实际标题，层级和重名目标各自保留，修改后可刷新',t=>{
   const f=fixture(t);f.headings.push(f.heading('文档标题',1,0,{title:true}),f.heading('功能详情',2,100,{logicalLevel:1}),f.heading('确认规则',3,400),f.heading('确认规则',3,700),f.heading('   ',2,800));
-  const outline=f.create();assert.deepEqual(f.nav.children.map(control=>control.textContent),['功能详情','确认规则','确认规则']);assert.deepEqual(f.nav.children.map(control=>control.style.paddingLeft),['12px','40px','40px']);
+  const outline=f.create();assert.deepEqual(f.nav.children.map(control=>control.textContent),['功能详情','确认规则','确认规则']);assert.deepEqual(f.nav.children.map(control=>control.style.paddingLeft),['12px','26px','26px']);
   assert.notEqual(f.nav.children[1].attrs['aria-controls'],f.nav.children[2].attrs['aria-controls']);
   f.headings[1].textContent='功能范围';f.headings.splice(2,1);outline.update();assert.deepEqual(f.nav.children.map(control=>control.textContent),['功能范围','确认规则']);
+});
+
+test('自建目录标题与引用 PRD 混排时，同级章节保持相同缩进',t=>{
+  const f=fixture(t);f.headings.push(
+    f.heading('1 需求目标',2,100),
+    f.heading('2 功能模块清单',2,200),
+    f.heading('3 需求详情',2,300,{logicalLevel:1}),
+    f.heading('3.1 首次使用与套餐校验',3,400,{logicalLevel:2}),
+    f.heading('3.1.1 首次介绍弹窗',4,500,{logicalLevel:3}),
+    f.heading('3.1.2 套餐校验与用户协议',4,600),
+    f.heading('3.1.3 激活状态与套餐失效',4,700)
+  );
+  f.create();assert.deepEqual(f.nav.children.map(control=>control.style.paddingLeft),['12px','12px','12px','26px','40px','40px','40px']);
 });
 
 test('点击目录仅滚动需求正文，并给固定工具栏留出空间；滚动时更新当前章节',t=>{
@@ -34,4 +47,16 @@ test('长目录跟随当前章节，连续滚动合并刷新；退出后释放�
   const f=fixture(t);for(let i=0;i<12;i++)f.headings.push(f.heading('章节'+i,1,100+i*120));const outline=f.create();
   f.root.scrollTop=1100;f.rootEvents.get('scroll')();f.rootEvents.get('scroll')();assert.equal(f.frames.size,1);f.flush();assert(f.nav.scrollTop>0);
   f.windowEvents.get('resize')();assert.equal(f.frames.size,1);outline.dispose();assert.equal(f.frames.size,0);assert.equal(f.rootEvents.size,0);assert.equal(f.windowEvents.size,0);
+});
+
+test('恢复阅读章节及段内位置，章节前插入内容或重编号后仍定位原内容',t=>{
+  const f=fixture(t);f.headings.push(f.heading('3.4.1 回复规范',4,120),f.heading('3.4.2 请求处理规则',4,600));const outline=f.create();
+  f.root.scrollTop=650;f.nav.scrollTop=24;const position=outline.capture();assert.equal(position.heading,'3.4.2 请求处理规则');assert.equal(position.offset,-50);
+  f.headings[1]=f.heading('3.4.5 请求处理规则',4,900);outline.update();f.root.scrollTop=0;outline.restore(position);assert.equal(f.root.scrollTop,950);assert.equal(f.nav.scrollTop,24);assert.equal(f.nav.children[1].attrs['aria-current'],'location');
+});
+
+test('重名章节按原出现位置恢复；章节删除及损坏坐标安全回退',t=>{
+  const f=fixture(t);f.headings.push(f.heading('规则',3,120),f.heading('规则',3,600));const outline=f.create();f.root.scrollTop=620;
+  const position=outline.capture();assert.equal(position.occurrence,1);f.root.scrollTop=0;outline.restore(position);assert.equal(f.root.scrollTop,620);
+  f.headings.length=0;outline.update();f.root.scrollTop=0;outline.restore(position);assert.equal(f.root.scrollTop,620);outline.restore({scrollTop:'invalid'});assert.equal(f.root.scrollTop,620);
 });

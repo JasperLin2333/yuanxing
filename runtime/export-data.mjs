@@ -1,4 +1,24 @@
-// 展示数据引用静态研发 JSON 中已有的字符串，保持 manifest/files 原样可读。
+import {gzipSync} from 'node:zlib';
+
+// 小数据保持直接可读；大数据默认无损压缩，只在实际减小时采用。
+export function packExportArtifact(artifact){
+  const text=JSON.stringify(artifact),bytes=Buffer.byteLength(text);
+  if(bytes<65536)return artifact;
+  const packed={encoding:'gzip-base64',data:gzipSync(text,{level:9}).toString('base64')};
+  return Buffer.byteLength(JSON.stringify(packed))<bytes?packed:artifact;
+}
+
+// 自包含读取器：浏览器使用内嵌解压器，Node 可传入 node:zlib 的 gunzipSync。
+export function decodeExportArtifact(artifact,gunzip=globalThis.fflate?.gunzipSync){
+  if(!artifact?.encoding)return artifact;
+  if(artifact.encoding!=='gzip-base64'||typeof artifact.data!=='string')throw new Error('离线数据编码不支持');
+  if(typeof gunzip!=='function')throw new Error('离线解压器缺失');
+  const binary=atob(artifact.data),bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(gunzip(bytes)));
+}
+
+// 展示数据引用同一份研发数据中的字符串，解压后还原 manifest/files。
 const anchorSize=96;
 function anchors(text){
   const positions=new Set([0]);

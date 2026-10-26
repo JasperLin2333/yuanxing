@@ -11,6 +11,16 @@ import {copyCanvasSelection,pasteCanvasSelection,alignCanvasNodes,distributeCanv
 import {reconcileCanvasCards,createLibrary} from '../runtime/library.mjs';
 
 const fixture=()=>({version:1,title:'测试项目',modules:[{id:'a',title:'模块甲',entry:'one'},{id:'b',title:'模块乙',entry:'two'},{id:'c',title:'模块丙',entry:'unused'}],nodes:[{id:'one',module:'a',title:'第一页',kind:'html',path:'states/one.html',width:1280,height:800,x:60,y:60},{id:'two',module:'b',title:'第二页',kind:'html',path:'states/two.html',width:375,height:812,x:60,y:60},{id:'unused',module:'c',title:'无关页面',kind:'note',width:640,height:320,x:60,y:60}],edges:[{id:'go',from:'one',to:'two',label:'下一步',selector:'#go'}],annotations:[{id:'pin',node:'one',point:[.3,.5],text:'原文案 → 新文案'},{id:'unrelated',node:'unused',text:'其他说明'}]});
+test('刷新偏好保存当前 Tab 和文档位置，完整原型沿用同一项目存储键',async()=>{
+  const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),source=app.slice(app.indexOf('function viewKey(){'),app.indexOf('function rememberView(){'));
+  const storage=new Map(),position={heading:'3.4.2 请求处理规则',offset:-40,scrollTop:600,outlineScroll:120};
+  const state={model:fixture(),originalReadonly:false,readonly:false,viewReady:true,moduleId:'a',current:'one',recycleOpen:false,camera:{x:1,y:2,scale:1},cameras:{},activeCameraKey:()=> 'a',flowContext:{},linesHidden:false,documentMode:true,experience:false,activeFlow:'pc',location:{pathname:'/project'},documentView:{capturePosition:()=>position},localStorage:{setItem:(key,value)=>storage.set(key,value)}};
+  const context=vm.createContext(state);vm.runInContext(source+'globalThis.save=saveView;',context);context.save();
+  const key=[...storage.keys()][0];let restored=restoreView(state.model,JSON.parse(storage.get(key)));assert.equal(restored.view,'document');assert.deepEqual(restored.documentPosition,position);
+  context.documentMode=false;context.experience=true;context.readonly=true;context.current='two';context.save();assert.equal(storage.size,1);restored=restoreView(state.model,JSON.parse(storage.get(key)));assert.equal(restored.view,'prototype');assert.equal(restored.current,'two');assert.equal(restored.activeFlow,'pc');
+  context.experience=false;context.readonly=false;context.save();assert.equal(restoreView(state.model,JSON.parse(storage.get(key))).view,'review');
+  assert.equal(restoreView(state.model,{view:'unknown'}).view,null);
+});
 test('普通提示五秒后消失，新提示重置计时，并支持手动关闭',async()=>{
   const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),source=app.slice(app.indexOf('function closeNotice(){'),app.indexOf('function updateHistoryButtons(){'));
   const timers=new Map(),message={dataset:{},hidden:true,children:[],replaceChildren(...children){this.children=children;},append(child){this.children.push(child);}};let serial=0;

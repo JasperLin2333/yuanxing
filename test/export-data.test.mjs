@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {randomBytes} from 'node:crypto';
+import {gunzipSync} from 'node:zlib';
 import {spawnSync} from 'node:child_process';
-import {compactExportBoot,restoreExportBoot} from '../runtime/export-data.mjs';
+import {compactExportBoot,restoreExportBoot,packExportArtifact,decodeExportArtifact} from '../runtime/export-data.mjs';
 import {createCompatibilityBundle} from '../runtime/compatibility.mjs';
 import {standalone} from '../runtime/server.mjs';
 
@@ -39,17 +40,30 @@ test('共享片段只能引用完整范围，缺失的来源、版本及越界�
   invalid.sharedStrings.version=2;assert.throws(()=>restoreExportBoot(invalid,artifact),/版本/);
 });
 
-test('三个视图离线脚本实际还原原始页面，研发 JSON 仍能独立直接解析',async()=>{
+test('大数据默认压缩且原图、事件、正文及 Unicode 可静态无损还原，小数据与无收益数据不膨胀',()=>{
+  const expected=createCompatibilityBundle(fixture()),before=JSON.stringify(expected),packed=packExportArtifact(expected);
+  assert.equal(packed.encoding,'gzip-base64');assert(Buffer.byteLength(JSON.stringify(packed))<Buffer.byteLength(before));
+  assert.deepEqual(decodeExportArtifact(JSON.parse(JSON.stringify(packed)),gunzipSync),expected);assert.equal(JSON.stringify(expected),before);
+  const small={files:{'one.html':'<main>原文 </script> 😀 &quot;</main>'}};assert.equal(packExportArtifact(small),small);assert.equal(decodeExportArtifact(small),small);
+  const random={data:randomBytes(72000).toString('base64')};assert.equal(packExportArtifact(random),random);
+  assert.throws(()=>decodeExportArtifact({encoding:'unknown',data:''},gunzipSync),/编码/);
+  assert.throws(()=>decodeExportArtifact(packed,null),/解压器/);
+  assert.throws(()=>decodeExportArtifact({encoding:'gzip-base64',data:'aW52YWxpZA=='},gunzipSync));
+});
+
+test('三个视图真实执行内嵌解压器和启动还原，无网络及原生解压 API 仍保留完整页面',async()=>{
   const bundle=fixture(),expected=createCompatibilityBundle(bundle);
   for(const view of ['review','prototype','document']){
     const html=await standalone(bundle,{view});
     const artifactText=html.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1];
-    assert.deepEqual(JSON.parse(artifactText),expected);
+    const artifact=JSON.parse(artifactText);assert.equal(artifact.encoding,'gzip-base64');assert.deepEqual(decodeExportArtifact(artifact,gunzipSync),expected);
     const bootScript=html.match(/<script>(globalThis\.YUANXING_BOOT=[\s\S]*?);<\/script>/)[1];
     const moduleScript=html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
-    const end="JSON.parse(document.getElementById('yuanxing-artifact').textContent));";
+    const end="JSON.parse(document.getElementById('yuanxing-artifact').textContent)));";
     assert(moduleScript.includes(end));const prelude=moduleScript.slice(0,moduleScript.indexOf(end)+end.length);
-    const context=vm.createContext({document:{getElementById:id=>{assert.equal(id,'yuanxing-artifact');return {textContent:artifactText};}}});
+    const context=vm.createContext({atob,TextDecoder,document:{getElementById:id=>{assert.equal(id,'yuanxing-artifact');return {textContent:artifactText};}}});
+    const vendorScript=html.match(/<script>([\s\S]*?)<\/script>/)[1];vm.runInContext(vendorScript,context);
+    assert.equal(typeof context.fflate.gunzipSync,'function');assert.equal(context.DecompressionStream,undefined);
     vm.runInContext(bootScript,context);assert(context.YUANXING_BOOT.sharedStrings);
     vm.runInContext(prelude,context);assert.deepEqual(JSON.parse(JSON.stringify(context.YUANXING_BOOT)),{readonly:true,view,bundle});
     for(const [,attrs,source] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)){

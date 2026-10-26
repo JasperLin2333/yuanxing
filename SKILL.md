@@ -4,7 +4,7 @@ description: 用自然语言进行产品需求设计与原型迭代，复用截�
 license: MIT
 metadata:
   author: JasperLin2333
-  version: "0.4.1"
+  version: "0.4.2"
 ---
 
 # 元形
@@ -53,4 +53,5 @@ node "<Skill目录>/scripts/yuanxing.mjs" locate --root "<项目目录>" --query
 
 - 按影响同步已有分享，覆盖前确认是本项目生成物；普通迭代不自动生成三视图、三渠道包或发布 GitHub。仅用户要求打开时启动工作台，不默认服务、浏览器、截图或自动验收。
 - CLI 命令按需查 `help`；三视图可导出离线单 HTML，日常改源。交付入口、检查及未验证部分，原型注明待用户验收；推送和市场发布须有用户授权。
+- 默认导出无损压缩并核对最终 HTML 的实际字节数，保留原图、全部页面和交互。用于 WorkBuddy 的 50 MB 预览时须小于 50,000,000 字节并留余量；超限先查重复资源与编码，不以降画质、删内容或 ZIP 体积冒充达标。数据读取见[交付格式](references/document.md#离线交付)。
 - 检查成功只读摘要，失败再看报错；交付说明实际证据，不以用例数量代表质量。维护选测见[按影响验证](references/agent-adaptation.md#按影响验证)。

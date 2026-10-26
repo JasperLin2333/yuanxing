@@ -1,6 +1,6 @@
 {
   "name": "yuanxing",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "面向产品经理的 AI 原型工作台与通用 Skill",
   "type": "module",

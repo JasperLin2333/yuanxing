@@ -7,7 +7,7 @@ import {createDocumentView,validateDocument} from '../runtime/document.mjs';
 
 // 只模拟挂载接口与事件分发，不启动浏览器。
 function environment(t){
-  const listeners=new Map(),cleanups=[],originals={document:globalThis.document,window:globalThis.window,ResizeObserver:globalThis.ResizeObserver};
+  const listeners=new Map(),cleanups=[],originals={document:globalThis.document,window:globalThis.window,ResizeObserver:globalThis.ResizeObserver,requestAnimationFrame:globalThis.requestAnimationFrame,cancelAnimationFrame:globalThis.cancelAnimationFrame};
   const emitter=()=>{const handlers=new Map();return {addEventListener(type,fn){if(!handlers.has(type))handlers.set(type,new Set());handlers.get(type).add(fn);},removeEventListener(type,fn){handlers.get(type)?.delete(fn);},dispatch(type,data={}){let stopped=false;const event={target:this,preventDefault(){this.prevented=true;},stopPropagation(){},stopImmediatePropagation(){stopped=true;},...data,type};for(const fn of handlers.get(type)||[]){fn(event);if(stopped)break;}return event;}};};
   const element=tag=>({...emitter(),
     classList:{toggle(){}},closest(){return null;},matches(){return false;},getBoundingClientRect(){return {left:0,top:0};},setPointerCapture(){},tagName:tag.toUpperCase(),style:{},dataset:{},children:[],attrs:{},isConnected:true,clientWidth:1400,
@@ -23,6 +23,7 @@ function environment(t){
     removeEventListener(name,fn){listeners.get(name)?.delete(fn);}
   };
   globalThis.ResizeObserver=undefined;
+  const frames=new Map();let frameId=0;globalThis.requestAnimationFrame=fn=>{frames.set(++frameId,fn);return frameId;};globalThis.cancelAnimationFrame=id=>frames.delete(id);
   t.after(()=>{for(const cleanup of cleanups)cleanup();for(const [key,value] of Object.entries(originals)){if(value===undefined)delete globalThis[key];else globalThis[key]=value;}});
   return {viewport(){const parent=element('article'),viewport=element('div');parent.append(viewport);return viewport;},
     message(event){for(const fn of listeners.get('message')||[])fn(event);},cleanup:fn=>cleanups.push(fn)};

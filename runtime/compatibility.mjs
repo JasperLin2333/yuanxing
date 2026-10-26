@@ -1,6 +1,7 @@
 // 从同一份项目生成可被研发读取的 manifest/files；不改写页面源与原生播放数据。
 import {expandHTML} from './core.mjs';
 import {defaultDocument,walkDocument,documentSourceKey} from './document.mjs';
+import {packExportArtifact} from './export-data.mjs';
 const compatEscape = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const compatDecode = value => value.replace(/&(?:amp|quot|apos|lt|gt|#\d+|#x[\da-f]+);/gi,entity=>{const named={'&amp;':'&','&quot;':'"','&apos;':"'",'&lt;':'<','&gt;':'>'};if(named[entity.toLowerCase()])return named[entity.toLowerCase()];const number=entity[2].toLowerCase()==='x'?parseInt(entity.slice(3,-1),16):parseInt(entity.slice(2,-1),10);return number>0&&number<=0x10ffff?String.fromCodePoint(number):entity;});
 function compatElements(html) {
@@ -132,6 +133,6 @@ export function createCompatibilityBundle(bundle) {
 }
 
 export function compatibilityDataTag(bundle,payload=createCompatibilityBundle(bundle)) {
-  const json=JSON.stringify(payload).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+  const json=JSON.stringify(packExportArtifact(payload)).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
   return `<script id="yuanxing-artifact" type="application/json">${json}</script>`;
 }

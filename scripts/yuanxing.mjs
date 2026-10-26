@@ -113,7 +113,7 @@ export async function run(args,{sessionToken}={}){
     if(await exists(out)){const stat=await fs.lstat(out);if(stat.isSymbolicLink()||!stat.isFile()||!flags.replace)throw new Error('输出已存在；确认是生成文件后使用 --replace');}
     const html=await standalone(bundle,{module:flags.module,entryModule:flags.module,view,flow:flags.flow,extension:store.extension});
     await fs.mkdir(path.dirname(out),{recursive:true});await fs.writeFile(out,html,{flag:flags.replace?'w':'wx'});
-    console.log(`已生成 ${out}`);return;
+    const bytes=Buffer.byteLength(html);console.log(`已生成 ${out}（${(bytes/1_000_000).toFixed(2)} MB，${bytes} 字节）`);return;
   }
   if(command==='apply'){
     const baseRaw=await fs.readFile(path.resolve(required(flags,'base')),'utf8'),base=JSON.parse(baseRaw),next=JSON.parse(await fs.readFile(path.resolve(required(flags,'model')),'utf8'));
