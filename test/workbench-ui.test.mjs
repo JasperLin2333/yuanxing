@@ -9,10 +9,16 @@ test('导出菜单只有三种完整产物，导出等待文字保存并始终�
   const index=await readFile(new URL('../runtime/index.html',import.meta.url),'utf8'),menu=index.match(/<div id="export-options"[\s\S]*?<\/div>/)[0];
   assert.deepEqual([...menu.matchAll(/data-action="([^"]+)"/g)].map(match=>match[1]),['export-all','export-document','export-prototype']);
   const calls=[],elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,{firstChild:{textContent:''},hidden:true});return elements.get(id);};
-  const state={exporting:false,conflict:false,dirty:false,$:get,closeMenus(){},documentView:{async flush(){calls.push('文字保存');}},pendingImages:new Set(),saveFlight:null,async save(){calls.push('编排保存');},apiBase:'',token:'session',moduleId:'main',model:{title:'项目'},async fetch(url,options){calls.push(JSON.parse(options.body));return {ok:true,text:async()=>'<html></html>'};},download(){},notice(){}};
+  const state={exporting:false,conflict:false,dirty:false,readonly:false,originalReadonly:false,$:get,closeMenus(){},documentView:{async flush(){calls.push('文字保存');}},pendingImages:new Set(),saveFlight:null,async save(){calls.push('编排保存');},apiBase:'',token:'session',moduleId:'main',model:{title:'项目'},async fetch(url,options){calls.push(JSON.parse(options.body));return {ok:true,text:async()=>'<html></html>'};},download(){},notice(){}};
   const context=vm.createContext(state);vm.runInContext(app.slice(app.indexOf('async function exportFile('),app.indexOf('\nconst imageTypes=')),context);
   for(const view of ['review','document','prototype']){calls.length=0;await context.exportFile(view);assert.deepEqual(calls.slice(0,2),['文字保存','编排保存']);assert.equal(calls[2].module,null);assert.equal(calls[2].view,view);}
   state.documentView.flush=async()=>{throw new Error('原文冲突');};calls.length=0;await assert.rejects(context.exportFile('document'),/原文冲突/);assert.equal(calls.length,0);assert.equal(get('#export-trigger').disabled,false);
+});
+
+test('离线分享导出使用内嵌内容而不连接服务器',async()=>{
+  const calls=[],trigger={firstChild:{textContent:''}},state={exporting:false,conflict:false,readonly:true,originalReadonly:true,offlineSource:'完整离线源码',model:{title:'示例'},$:()=>trigger,closeMenus(){},offlineExportHTML(source,view){calls.push([source,view]);return '离线 HTML';},download(html,name,type){calls.push([html,name,type]);},fetch(){throw new Error('离线导出不得联网');}};
+  const context=vm.createContext(state);vm.runInContext(app.slice(app.indexOf('async function exportFile('),app.indexOf('\nconst imageTypes=')),context);
+  for(const view of ['review','document','prototype']){calls.length=0;await context.exportFile(view);assert.deepEqual(calls[0],['完整离线源码',view]);assert.equal(calls[1][0],'离线 HTML');assert.equal(calls[1][2],'text/html');assert.equal(trigger.disabled,false);}
 });
 
 test('需求文档使用同一个顶栏侧栏按钮，折叠目录不改画布偏好，文档没有结构编辑控件',()=>{

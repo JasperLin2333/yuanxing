@@ -73,3 +73,19 @@ test('三个视图真实执行内嵌解压器和启动还原，无网络及原�
     }
   }
 });
+
+
+test('离线分享可以重新导出三种视图并完整保留内嵌数据',async()=>{
+  const {offlineExportHTML}=await import('../runtime/core.mjs');
+  const boot={readonly:true,view:'review',flow:'old',sharedStrings:['保留中文','<&'],bundle:{title:'示例'}};
+  const source='<!doctype html><html><head><script id="yuanxing-artifact" type="application/json">{"files":{"a":"正文"}}</script></head><body><script>globalThis.YUANXING_BOOT='+JSON.stringify(boot).replace(/</g,'\\u003c')+';</script><script type="module">export const hello=1;</script></body></html>';
+  for(const view of ['review','document','prototype']){const result=offlineExportHTML(source,view),data=JSON.parse(result.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]);assert.equal(data.view,view);assert.equal(data.flow,null);assert.deepEqual(data.sharedStrings,boot.sharedStrings);assert.match(result,/<script id="yuanxing-artifact" type="application\/json">\{"files":\{"a":"正文"\}\}<\/script>/);assert.match(result,/export const hello=1/);assert.equal(JSON.parse(offlineExportHTML(result,'review').match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]).view,'review');}
+  assert.throws(()=>offlineExportHTML(source,'unknown'),/视图/);assert.throws(()=>offlineExportHTML('<html></html>','review'),/缺失/);
+});
+
+
+test('真实生成的离线文件再次导出时保留压缩资源与研发读取数据',async()=>{
+  const {offlineExportHTML}=await import('../runtime/core.mjs');const source=await standalone(fixture(),{view:'review'});
+  const artifact=source.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1];
+  for(const view of ['review','document','prototype']){const output=offlineExportHTML(source,view),boot=JSON.parse(output.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]);assert.equal(boot.view,view);assert.equal(output.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1],artifact);}
+});

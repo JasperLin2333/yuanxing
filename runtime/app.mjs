@@ -1,5 +1,5 @@
 import {handoffAncestors,handoffClean,collectHandoff,handoffDocument,handoffPrompt,createDOMPicker} from './handoff.mjs';
-import {clone,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
+import {clone,offlineExportHTML,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
 import {requirementText,canvasExplanation,writeCanvasExplanation,connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
 import {createLibrary,libraryStyles,reconcileCanvasCards} from './library.mjs';
 import {prototypeDocument,thumbnailHTML,flowEntries,cleanContext,createPreviewQueue,bindNativeDocument} from './player.mjs';
@@ -41,6 +41,8 @@ let experience=boot.view==='prototype',activeFlow=null,experienceReturn=null;
 let documentMode=boot.view==='document';
 let imagePreviewStack=[];
 const originalReadonly=readonly;
+const offlineSource=originalReadonly?'<!doctype html>'+document.documentElement.outerHTML:null;
+document.body.classList.toggle('offline-share',originalReadonly);
 const extensionHost={getState:()=>({model,frames,current,mode,pageScale,experience,n:node(current)}),node,openNode,measure,visibleRect,renderOverlays,renderInspector,download,exitExperience};
 const projectExtension=createProjectExtension(extensionHost);
 document.body.classList.toggle('declarative-pages',!!projectExtension?.declarative);
@@ -644,7 +646,21 @@ function zoom(factor,event){
 }
 
 function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-async function exportFile(view='review'){if(exporting||conflict)return;exporting=true;closeMenus();const trigger=$('#export-trigger');trigger.disabled=true;trigger.firstChild.textContent='导出中… ';try{await documentView.flush();if(pendingImages.size)await Promise.all([...pendingImages]);if(saveFlight)await saveFlight;await save();if(dirty||conflict){if($('#message').hidden)notice('修改尚未保存，请重试。',[['重试',save]],'save');return;}const r=await fetch(apiBase+'/api/export',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({module:null,entryModule:moduleId,view})});if(!r.ok){notice((await r.json()).error);return;}download(await r.text(),`${model.title}-${view==='prototype'?'完整原型':view==='document'?'需求文档':'完整评审台'}.html`,'text/html');}finally{exporting=false;trigger.disabled=false;trigger.firstChild.textContent='导出 HTML ';}}
+async function exportFile(view='review'){
+  if(exporting||conflict||readonly&&!originalReadonly)return;
+  exporting=true;closeMenus();const trigger=$('#export-trigger');trigger.disabled=true;trigger.firstChild.textContent='导出中… ';
+  try{
+    let html;
+    if(originalReadonly)html=offlineExportHTML(offlineSource,view);
+    else{
+      await documentView.flush();if(pendingImages.size)await Promise.all([...pendingImages]);if(saveFlight)await saveFlight;await save();
+      if(dirty||conflict){if($('#message').hidden)notice('修改尚未保存，请重试。',[['重试',save]],'save');return;}
+      const r=await fetch(apiBase+'/api/export',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({module:null,entryModule:moduleId,view})});
+      if(!r.ok){notice((await r.json()).error);return;}html=await r.text();
+    }
+    download(html,`${model.title}-${view==='prototype'?'完整原型':view==='document'?'需求文档':'完整评审台'}.html`,'text/html');
+  }finally{exporting=false;trigger.disabled=false;trigger.firstChild.textContent='导出 HTML ';}
+}
 const imageTypes=['image/png','image/jpeg','image/webp'];
 function clipboardImages(event){const files=[...(event.clipboardData?.files||[])];return files.length?files:[...(event.clipboardData?.items||[])].filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);}
 async function uploadImage(file){
@@ -696,7 +712,7 @@ function imageMenu(id,event,trigger){
   menu.style.left=Math.max(8,Math.min(event?.clientX??(r.right-menu.offsetWidth),innerWidth-menu.offsetWidth-8))+'px';menu.style.top=Math.max(8,Math.min(event?.clientY??(r.bottom+4),innerHeight-menu.offsetHeight-8))+'px';
   if(trigger){trigger.setAttribute('aria-expanded','true');menu.querySelector('button').focus({preventScroll:true});}
 }
-function exportMenu(open=true){if(readonly||exporting)return;closeMenus();$('#export-options').hidden=!open;$('#export-trigger').setAttribute('aria-expanded',String(open));}
+function exportMenu(open=true){if(readonly&&!originalReadonly||exporting)return;closeMenus();$('#export-options').hidden=!open;$('#export-trigger').setAttribute('aria-expanded',String(open));}
 function canvasMenu(event){if(readonly||current||recycleOpen)return;closeMenus();insertPoint=event?canvasPoint(event):defaultInsertPoint();const menu=$('#canvas-add-menu'),r=$('#canvas-add-trigger').getBoundingClientRect();menu.hidden=false;menu.style.left=Math.max(8,Math.min(event?.clientX??r.left,innerWidth-menu.offsetWidth-8))+'px';menu.style.top=Math.max(8,Math.min(event?.clientY??r.top-menu.offsetHeight-8,innerHeight-menu.offsetHeight-8))+'px';$('#canvas-add-trigger').setAttribute('aria-expanded','true');}
 function addNote(){if(readonly)return;const point=insertPoint||defaultInsertPoint();insertPoint=null;edit(m=>{const id=uid('note');m.nodes.push({id,module:moduleId,title:'流程说明',kind:'note',width:640,height:320,x:point[0],y:point[1],description:''});selected={type:'node',id};});if(panels.inspector){const input=$('#inspector input');input?.focus();input?.select();}}
 function toggleDeveloperMode(force){
@@ -743,7 +759,7 @@ async function action(name){
     case 'export-all':await exportFile();break;
   }
 }
-document.addEventListener('click',event=>{const target=event.target.closest('[data-action]');if(target&&!(readonly&&['image','note','annotate','canvas-menu','export-menu','undo','export-all'].includes(target.dataset.action)))action(target.dataset.action).catch(error=>notice(error.message));});
+document.addEventListener('click',event=>{const target=event.target.closest('[data-action]');if(target&&!(readonly&&['image','note','annotate','canvas-menu','undo'].includes(target.dataset.action)))action(target.dataset.action).catch(error=>notice(error.message));});
 $('#export-menu').addEventListener('pointerenter',()=>exportMenu());$('#export-menu').addEventListener('pointerleave',()=>{exportCloseTimer=setTimeout(()=>{if(!$('#export-menu').contains(document.activeElement))closeMenus();},160);});
 document.addEventListener('pointerdown',event=>{if(!event.target.closest('#export-menu,#canvas-add-menu,#canvas-add-trigger,#node-image-menu,[aria-controls="node-image-menu"]')){closeMenus();insertPoint=null;}});
 document.addEventListener('pointerdown',dismissZoomSettings,true);

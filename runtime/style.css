@@ -290,6 +290,7 @@ dialog h2{margin:0 0 20px;font-size:14px;font-weight:600}
 #image-replace-description{margin:0;overflow-wrap:anywhere}
 dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .readonly #edit-tools,.readonly #export-menu,.readonly .editor-only{display:none!important}
+.readonly.offline-share #export-menu{display:block!important}
 @media(max-width:1050px){
   .layout{--sidebar-width:200px;--inspector-width:264px}
   .toolbar{gap:8px;padding:0 12px}

@@ -2,6 +2,15 @@
 import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty} from './routing.mjs';
 import {validateDocument,pruneDocument,documentAssetPaths} from './document.mjs';
 export const clone = value => JSON.parse(JSON.stringify(value));
+export function offlineExportHTML(html,view){
+  if(!['review','document','prototype'].includes(view))throw new Error('导出视图不正确');
+  let found=false;
+  const output=html.replace(/(<script>globalThis\.YUANXING_BOOT=)([\s\S]*?)(;<\/script>)/,(match,start,json,end)=>{
+    found=true;const boot=JSON.parse(json);if(!boot.readonly)throw new Error('不是离线分享文件');boot.view=view;boot.flow=null;
+    return start+JSON.stringify(boot).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029')+end;
+  });
+  if(!found)throw new Error('离线分享数据缺失');return output;
+}
 export const uid = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isFlowContext = value => value!==null&&typeof value==='object'&&!Array.isArray(value)&&Object.entries(value).every(([key,item])=>/^[A-Za-z][\w-]*$/.test(key)&&(['string','boolean'].includes(typeof item)||typeof item==='number'&&Number.isFinite(item)));
