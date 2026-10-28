@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {eligibleEdges,nextContext} from '../runtime/core.mjs';
+import {eligibleEdges,nextContext,initialNodeContext} from '../runtime/core.mjs';
 
 const source=await readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8');
 const controller=source.slice(source.indexOf('function renderImagePreview(){'),source.indexOf('function annotationTarget(){'));
@@ -13,7 +13,7 @@ function fixture(current='home'){
   const element=()=>({style:{},children:[],open:false,scrollTop:0,scrollLeft:0,replaceChildren(){this.children=[];},append(child){this.children.push(child);},setAttribute(name,value){this[name]=value;},showModal(){this.open=true;},close(){this.open=false;},addEventListener(name,fn){listeners[name]=fn;}});
   const $=selector=>{if(!elements.has(selector))elements.set(selector,element());return elements.get(selector);};
   const nodes=[{id:'home',module:'main',kind:'html'},{id:'other',module:'main',kind:'html'},...['first','second'].map(id=>({id,module:'images',kind:'image',title:id,path:id+'.png',width:800,height:1600}))];
-  const page={input:'尚未发送的内容',scrollTop:420},state={devMode:false,$,clone,eligibleEdges,nextContext,current,experience:true,imagePreviewStack:[],flowContext:{role:'admin'},moduleId:'main',recycleOpen:false,cameras:{},camera:{},selected:{type:'node',id:current},mode:null,model:{nodes,edges:[],contextDefaults:{}},
+  const page={input:'尚未发送的内容',scrollTop:420},state={devMode:false,$,clone,eligibleEdges,nextContext,initialNodeContext,current,experience:true,imagePreviewStack:[],flowContext:{role:'admin'},moduleId:'main',recycleOpen:false,cameras:{},camera:{},selected:{type:'node',id:current},mode:null,model:{nodes,edges:[],contextDefaults:{}},
     document:{createElement:element,addEventListener(name,fn){listeners[name]=fn;}},node:id=>nodes.find(n=>n.id===id),nodeResource:n=>'data:image/png;base64,'+n.id,outgoing:id=>state.model.edges.filter(edge=>edge.from===id),projectExtension:null,
     closeAnnotationEditor(){},activeCanvasNodes:()=>nodes.filter(n=>n.module==='main'),saveCanvasCamera(){},isBranch:()=>false,renderAll(){state.renders++;},renders:0,renderInspector(){},highlightCards(){},notice(){},exitExperience(){state.exited=true;},frames:{[current]:page}};
   const context=vm.createContext(state);vm.runInContext(controller+navigation,context);
@@ -61,4 +61,17 @@ test('同一热点有多条路径时直接沿首条符合上下文的连线继�
   const {state:s,$}=fixture();
   s.follow([{to:'other',when:{role:'member'}},{to:'first',when:{role:'admin'},setContext:{step:'first'}},{to:'second'}]);
   assert.equal($('#image-preview-title').textContent,'first');assert.equal(s.flowContext.step,'first');assert.equal(s.current,'home');
+});
+
+test('打开节点只在进入时设置初始上下文，流程数据与恢复数据按约定保留',()=>{
+  const {state:s}=fixture();s.experience=false;s.model.contextDefaults={role:'member',keep:'default'};s.model.nodes.find(n=>n.id==='other').initialContext={dialog:'open',role:'admin'};
+  s.openNode('other');assert.deepEqual(clone(s.flowContext),{role:'admin',keep:'default',dialog:'open'});
+  s.flowContext.dialog='closed';s.openNode('other',true,{restore:true});assert.equal(s.flowContext.dialog,'closed');
+  s.travel({to:'other',setContext:{dialog:'edge',message:'kept'}});assert.equal(s.flowContext.dialog,'open');assert.equal(s.flowContext.message,'kept');
+});
+test('图片节点初值独立生效并在逐层返回时恢复来源上下文',()=>{
+  const {state:s}=fixture();s.model.nodes.find(n=>n.id==='first').initialContext={step:'initial-image'};s.model.nodes.find(n=>n.id==='second').initialContext={step:'second-image'};
+  s.travel({to:'first',setContext:{step:'edge-first'}});assert.equal(s.flowContext.step,'initial-image');
+  s.travel({to:'second',setContext:{step:'edge-second'}});assert.equal(s.flowContext.step,'second-image');
+  s.backFromImagePreview();assert.equal(s.flowContext.step,'initial-image');s.backFromImagePreview();assert.deepEqual(clone(s.flowContext),{role:'admin'});
 });

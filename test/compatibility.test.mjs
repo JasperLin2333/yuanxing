@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import vm from 'node:vm';
 import {createCompatibilityBundle,compatibleSelectorTargets,compatibilityDataTag} from '../runtime/compatibility.mjs';
 
 function fixture(){return {model:{version:1,title:'订单确认',contextDefaults:{role:'member'},modules:[{id:'main',title:'确认订单',entry:'one'},{id:'second',title:'操作结果'}],nodes:[{id:'one',module:'main',title:'确认页',kind:'html',path:'pages/one.html',description:'确认后进入结果页。',width:1280,height:800,x:0,y:0},{id:'two',module:'second',title:'结果页',kind:'html',path:'pages/two.html',width:1280,height:800,x:500,y:0}],edges:[{id:'confirm',from:'one',to:'two',selector:'[data-yx-id="confirm"]',label:'确认',description:'保存选择后继续。'}],annotations:[{id:'rule',node:'one',selector:'#choice',text:'选项是本次操作的必要输入。'}]},resources:{one:'<main><input id="choice"><button data-yx-id="confirm" data-ec-component="Button">确认</button></main>',two:'<main>完成</main>'},fragments:{},images:{}};}
@@ -36,4 +37,19 @@ test('JSON 数据块无须执行脚本即可提取，正文的结束标签不会
 });
 test('自由正文进入基础逻辑字段，对照表格内的需求说明关联到同一行的页面',()=>{
   const source=fixture();source.model.document={version:1,blocks:[{id:'goal',type:'text',text:'本次目标：完成订单确认。'},{id:'table',type:'table',rows:[{id:'row',cells:[{id:'left',blocks:[{id:'page',type:'prototype',node:'one'}]},{id:'right',blocks:[{id:'detail',type:'text',text:'每次只能确认一份订单，确认期间保留当前选择。'}]}]}]}]};const payload=createCompatibilityBundle(source),requirement=payload.manifest.requirements[0],html=payload.files[requirement.states[0].html];assert(requirement.logic.some(logic=>logic.text.includes('本次目标')));const detail=requirement.logic.find(logic=>logic.text.includes('每次只能确认'));assert(detail);assert(html.includes(`data-logic-id="${detail.id}"`));assert.equal(source.model.nodes[0].description,'确认后进入结果页。');
+});
+
+test('研发 HTML 的节点初值与初始可见性保留，跨页上下文限制明确记录',()=>{
+  const source=fixture(),html='<main><input data-yx-bind="customer"><section data-yx-initial-visible="dialog" data-yx-value="open" hidden></section></main>';
+  source.model.nodes[0].initialContext={dialog:'open',customer:'许安'};source.model.nodes[1].initialContext={dialog:'closed'};source.resources.one=source.resources.two=html;
+  const payload=createCompatibilityBundle(source),states=payload.manifest.requirements[0].states;
+  const one=payload.files[states.find(s=>s.id==='one').html],two=payload.files[states.find(s=>s.id==='two').html];
+  assert(one.includes('"dialog":"open"'));assert(one.includes('"customer":"许安"'));assert(two.includes('"dialog":"closed"'));assert(one.includes('[data-yx-initial-visible]'));assert(one.includes('[data-yx-bind]'));
+  assert(payload.yuanxing.limitations.some(item=>item.type==='initial-context-flow'&&item.node==='two'));
+  const panel={dataset:{yxInitialVisible:'dialog',yxValue:'open'},hidden:true},field={dataset:{yxBind:'customer'},value:'',type:'text'},events={};
+  const close={dataset:{yxAction:'hide',yxTarget:'#dialog'},disabled:false};
+  const doc={querySelectorAll(selector){return ({'[data-yx-bind]':[field],'[data-yx-initial-visible]':[panel],'#dialog':[panel]})[selector]||[];},addEventListener(name,handler){events[name]=handler;}};
+  const script=[...one.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];vm.runInNewContext(script,{document:doc});assert.equal(panel.hidden,false);assert.equal(field.value,'许安');
+  events.click({target:{closest:()=>close},preventDefault(){}});assert.equal(panel.hidden,true);events.input({target:field});assert.equal(panel.hidden,true);
+  for(const content of [one,two])for(const [,script] of content.matchAll(/<script>([\s\S]*?)<\/script>/g))assert.equal(spawnSync(process.execPath,['--check'],{input:script,encoding:'utf8'}).status,0);
 });

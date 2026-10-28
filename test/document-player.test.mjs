@@ -156,3 +156,30 @@ test('文档保存外框比例并复用缓存，重绘和撤销都不重建原�
   delete m.document.blocks[0].frameScale;view.render();assert.equal(mounts,1);assert.equal(parseFloat(viewport.style.height)-2,height);assert.equal(frameOf(viewport),frame);
   m.document.blocks[0].frameScale=NaN;assert(validateDocument(m).some(error=>error.includes('外框比例')));
 });
+
+test('文档中同一 HTML 按节点应用初值，跳转继承输入且仅覆盖指定字段',t=>{
+  const env=environment(t),viewport=env.viewport(),m=model();
+  m.nodes[0].initialContext={dialog:'open',customer:'初始客户'};m.nodes[1].initialContext={dialog:'closed'};m.edges[0].setContext={step:'next'};
+  const html='<button data-yx-action="hide" data-yx-target="#form">关闭</button><section id="form" data-yx-initial-visible="dialog" data-yx-value="open"></section>';
+  const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:html,two:html}})},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());
+  const first=frameOf(viewport),token=first.srcdoc.match(/"token":"([^"]+)"/)[1];assert(first.srcdoc.includes('"dialog":"open"'));assert(first.srcdoc.includes('"customer":"初始客户"'));
+  env.message({source:first.contentWindow,data:{yuanxing:token,type:'context',context:{customer:'顾言'}}});
+  env.message({source:first.contentWindow,data:{yuanxing:token,type:'follow',ids:['next']}});
+  const next=frameOf(viewport);assert.notEqual(next,first);assert(next.srcdoc.includes('"dialog":"closed"'));assert(next.srcdoc.includes('"customer":"顾言"'));assert(next.srcdoc.includes('"step":"next"'));assert(next.srcdoc.includes('"role":"admin"'));
+});
+
+test('文档声明式页面不拦截条件不匹配的控件，匹配时沿流程跳转',t=>{
+  const env=environment(t),m=model();m.edges[0].when={role:'member'};
+  const build=()=>{const viewport=env.viewport();const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:'<button>继续</button>',two:'<p>完成</p>'}}),createExtension:()=>({declarative:true})},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());return viewport;};
+  const first=build(),frame=frameOf(first),doc=loadFrame(frame),control={contains:other=>other===control,closest:()=>null};let prevented=0;
+  doc.listeners.click({target:{closest:value=>value==='#next'?control:null},preventDefault(){prevented++;}});assert.equal(prevented,0);assert.equal(frameOf(first),frame);
+  m.nodes[0].initialContext={role:'member'};const second=build(),original=frameOf(second),next=loadFrame(original);
+  next.listeners.click({target:{closest:value=>value==='#next'?control:null},preventDefault(){prevented++;}});assert.equal(prevented,1);assert.notEqual(frameOf(second),original);
+});
+
+test('声明式扩展读取节点合并后的初始上下文副本',t=>{
+  const env=environment(t),viewport=env.viewport(),m=model(),mountedOptions=[];
+  m.contextDefaults={customer:'原始客户'};m.nodes[0].initialContext={dialog:'open'};
+  const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:'<p>页面</p>'}}),createExtension:()=>({declarative:true,mount(doc,node,options){mountedOptions.push(options);options.context.customer='扩展内部修改';}})},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());
+  loadFrame(frameOf(viewport));assert.equal(mountedOptions[0].surface,'document');assert.equal(mountedOptions[0].interactive,true);assert.equal(mountedOptions[0].context.dialog,'open');assert.equal(m.contextDefaults.customer,'原始客户');
+});

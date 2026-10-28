@@ -1,7 +1,7 @@
 import {handoffAncestors,handoffClean,collectHandoff,handoffDocument,handoffPrompt,createDOMPicker} from './handoff.mjs';
-import {clone,offlineExportHTML,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
+import {clone,offlineExportHTML,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,initialNodeContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
 import {requirementText,canvasExplanation,writeCanvasExplanation,connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
-import {createLibrary,libraryStyles,reconcileCanvasCards} from './library.mjs';
+import {createLibrary,libraryStyles,reconcileCanvasCards,initializeCanvasThumbnail} from './library.mjs';
 import {prototypeDocument,thumbnailHTML,flowEntries,cleanContext,createPreviewQueue,bindNativeDocument} from './player.mjs';
 import {createProjectExtension} from './extension.mjs';
 import {createUpdates} from './updates.mjs';
@@ -22,7 +22,7 @@ const previewQueue=createPreviewQueue({request:callback=>requestAnimationFrame(c
 function stopPreviews(){previewObserver?.disconnect();previewObserver=null;previewQueue.clear();}
 function updatePreview(card,n){
   if(!card.isConnected||current)return;
-  const signature=canvasPreviewSignature(n,bundle);
+  const signature=canvasPreviewSignature(n,bundle)+(n.kind==='html'?JSON.stringify(initialNodeContext(model.contextDefaults||{},n)):'');
   if(canvasPreviews.get(card)!==signature){card.querySelector('.node-thumb')?.remove();if(!isBranch(n)){const thumb=document.createElement('div');thumb.className='node-thumb';frameFor(n,thumb,400/n.width);card.append(thumb);}canvasPreviews.set(card,signature);}
   else{const frame=card.querySelector('iframe'),image=card.querySelector('.node-thumb>img');if(frame)frame.title=n.title;if(image)image.alt=n.title;}
 }
@@ -251,12 +251,12 @@ function frameFor(n,container,scale,onload){
   const frame=document.createElement('iframe');frame.title=n.title;frame.className='page-frame';frame.tabIndex=thumbnail?-1:0;
   frame.style.width=n.width+'px';frame.style.height=n.height+'px';frame.style.transform=`scale(${scale})`;if(layout){frame.style.left=layout.left+'px';frame.style.top=layout.top+'px';}
   const html=expandHTML(bundle.resources[n.id]||'<p>页面资源不存在</p>',bundle.fragments||{});
-  if(thumbnail||projectExtension?.declarative||devMode){frame.setAttribute('sandbox','allow-same-origin');frame.tabIndex=thumbnail||!experience?-1:0;frame.srcdoc=thumbnailHTML(devMode&&devSnapshot?.id===n.id?devSnapshot.html:html);if(!thumbnail)frames[n.id]=frame;}
+  if(thumbnail||projectExtension?.declarative||devMode){frame.setAttribute('sandbox','allow-same-origin');frame.tabIndex=thumbnail||(!experience&&!(projectExtension?.nativeInteraction&&projectExtension?.nodeNativeInteraction))?-1:0;frame.srcdoc=thumbnailHTML(devMode&&devSnapshot?.id===n.id?devSnapshot.html:html);if(!thumbnail)frames[n.id]=frame;}
   else{
     frame.setAttribute('sandbox','allow-scripts');frame.dataset.bridge=uid('frame');frames[n.id]=frame;
-    frame.srcdoc=prototypeDocument(html,{token:frame.dataset.bridge,width:n.width,height:n.height,context:flowContext,edges:outgoing(n.id).map(({id,selector})=>({id,selector})),annotations:model.annotations.filter(a=>a.node===n.id&&a.selector).map(({id,selector,offset})=>({id,selector,offset}))});
+    frame.srcdoc=prototypeDocument(html,{token:frame.dataset.bridge,width:n.width,height:n.height,context:flowContext,edges:outgoing(n.id).map(({id,selector,when})=>({id,selector,when})),annotations:model.annotations.filter(a=>a.node===n.id&&a.selector).map(({id,selector,offset})=>({id,selector,offset}))});
   }
-  frame.onload=()=>{if(!frame.isConnected)return;frame.dataset.yxReady='true';if(projectExtension?.declarative&&!devMode)projectExtension.layout?.(frame.contentDocument,n);if(thumbnail||projectExtension?.declarative)measure(frame,n);onload?.(frame);};container.append(frame);
+  frame.onload=()=>{if(!frame.isConnected)return;frame.dataset.yxReady='true';if(projectExtension?.declarative&&!devMode)projectExtension.layout?.(frame.contentDocument,n);if(thumbnail)initializeCanvasThumbnail(frame.contentDocument,initialNodeContext(model.contextDefaults||{},n));if(thumbnail||projectExtension?.declarative)measure(frame,n);onload?.(frame);};container.append(frame);
 }
 function canvas(){
   devPicker?.destroy();devPicker=null;devElement=null;devOriginal=null;renderHandoffTools();
@@ -462,14 +462,14 @@ function backFromImagePreview(){
   const entry=imagePreviewStack.pop();if(!entry)return;flowContext=entry.returnContext;
   if(imagePreviewStack.length)renderImagePreview();else dismissImagePreview();
 }
-function openNode(id,fromFlow=false,{asPage=false,returnContext=flowContext}={}){
+function openNode(id,fromFlow=false,{asPage=false,returnContext=flowContext,restore=false}={}){
   const n=node(id);if(!n)return;
-  if(experience&&n.kind==='image'&&current&&!asPage){openImagePreview(n,returnContext);return;}
+  if(experience&&n.kind==='image'&&current&&!asPage){flowContext=initialNodeContext(fromFlow?flowContext:clone(model.contextDefaults||{}),n);openImagePreview(n,returnContext);return;}
   if(imagePreviewStack.length){dismissImagePreview();if(id===current)return;}
   if(id!==current)closeAnnotationEditor();
   if(!recycleOpen&&n.module!==moduleId&&!activeCanvasNodes().some(v=>v.id===id)){saveCanvasCamera();moduleId=n.module;camera=clone(cameras[moduleId]||{x:30,y:30,scale:.8});}
   if(isBranch(n)){selected={type:'node',id};renderInspector();highlightCards();return;}
-  if(!fromFlow)flowContext=clone(model.contextDefaults||{});current=id;selected={type:'node',id};mode=null;renderAll();
+  if(!fromFlow)flowContext=clone(model.contextDefaults||{});if(!restore)flowContext=initialNodeContext(flowContext,n);current=id;selected={type:'node',id};mode=null;renderAll();
 }
 function annotationTarget(){return current||(selected?.type==='node'?selected.id:null);}
 function updateAnnotationButton(){const trigger=$('#annotate-trigger'),target=node(current),active=mode==='annotate',label=active?'取消打点':'打点说明';trigger.hidden=readonly||!current;trigger.disabled=readonly||!target||isBranch(target);trigger.setAttribute('aria-pressed',String(active));trigger.setAttribute('aria-label',label);trigger.title=label;}
@@ -499,10 +499,10 @@ function resizePage(){
 function viewer(){
   devPicker?.destroy();devPicker=null;devElement=null;devOriginal=null;renderHandoffTools();
   stopPreviews();$('#nodes').replaceChildren();const n=node(current);$('#viewer-title').textContent=n.title;const stage=$('#page-stage');stage.replaceChildren();frames={};positions={};
-  stage.tabIndex=n.kind==='note'?0:-1;stage.classList.toggle('note-stage',n.kind==='note');stage.classList.toggle('mobile-page',canvasNodeType(n)==='mobile');stage.classList.toggle('native-prototype',!!(experience&&projectExtension?.nativeInteraction&&n.kind==='html'));noteFit=true;
+  stage.tabIndex=n.kind==='note'?0:-1;stage.classList.toggle('note-stage',n.kind==='note');stage.classList.toggle('mobile-page',canvasNodeType(n)==='mobile');stage.classList.toggle('native-prototype',!!(projectExtension?.declarative&&projectExtension?.nativeInteraction&&(experience||projectExtension?.nodeNativeInteraction)&&n.kind==='html'));noteFit=true;
   const avail=$('#page-viewport').clientWidth-48;pageScale=Math.min(1,Math.max(.2,avail/n.width));stage.style.width=n.width*pageScale+'px';stage.style.height=n.height*pageScale+'px';
-  frameFor(n,stage,pageScale,frame=>{if(frame&&projectExtension?.declarative&&!devMode){projectExtension.mount?.(frame.contentDocument,n);if(experience&&projectExtension.nativeInteraction)bindNativeDocument(frame.contentDocument,{getEdges:()=>outgoing(n.id),follow,onInput:(event,type)=>projectExtension.nativeInput?.(event,type),onKeyDown:event=>projectExtension.nativeKeyDown?.(event)});measure(frame,n);}if(frame&&devMode&&frames[current]===frame){devPicker=createDOMPicker(frame.contentDocument,{onSelect:element=>{devElement=element;renderHandoffTools();},onExit:()=>toggleDeveloperMode(false)});renderHandoffTools();}renderOverlays();if(!$('#inspector').contains(document.activeElement))renderInspector();});
-  stage.onwheel=null;stage.onpointerdown=null;projectExtension?.bindStage?.({stage});
+  frameFor(n,stage,pageScale,frame=>{if(frame&&projectExtension?.declarative&&!devMode){const interactive=!!(projectExtension.nativeInteraction&&(experience||projectExtension.nodeNativeInteraction));projectExtension.mount?.(frame.contentDocument,n,{interactive,surface:experience?'prototype':'node',context:cleanContext(flowContext)});if(interactive)bindNativeDocument(frame.contentDocument,{getEdges:()=>eligibleEdges(outgoing(n.id),flowContext),follow,onInput:(event,type)=>projectExtension.nativeInput?.(event,type),onKeyDown:event=>projectExtension.nativeKeyDown?.(event)});measure(frame,n);}if(frame&&devMode&&frames[current]===frame){devPicker=createDOMPicker(frame.contentDocument,{onSelect:element=>{devElement=element;renderHandoffTools();},onExit:()=>toggleDeveloperMode(false)});renderHandoffTools();}renderOverlays();if(!$('#inspector').contains(document.activeElement))renderInspector();});
+  stage.onwheel=null;stage.onpointerdown=null;if(experience||!(projectExtension?.declarative&&projectExtension?.nativeInteraction&&projectExtension?.nodeNativeInteraction&&n.kind==='html'))projectExtension?.bindStage?.({stage});
 }
 window.addEventListener('message',event=>{
   if(devMode&&devOriginal?.id===current&&event.source===devOriginal.frame.contentWindow&&event.data?.yuanxing===devOriginal.frame.dataset.bridge&&event.data?.type==='handoff-snapshot'&&typeof event.data.html==='string'){
@@ -520,7 +520,9 @@ window.addEventListener('message',event=>{
 });
 function renderOverlays(){
   updateAnnotationButton();if(!current)return;
-  const n=node(current),stage=$('#page-stage');if(devMode){stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());return;}if(experience&&projectExtension?.nativeInteraction&&n.kind==='html'){stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());return;}if(projectExtension?.renderOverlays)projectExtension.renderOverlays({n,stage,frame:frames[current],current,mode,pageScale},()=>renderPageHotspots(n,stage));
+  const n=node(current),stage=$('#page-stage');if(devMode){stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());return;}
+  if(projectExtension?.declarative&&projectExtension?.nativeInteraction&&(experience||projectExtension?.nodeNativeInteraction)&&n.kind==='html')stage.querySelectorAll('.hotspot,.pin,.capture,.prototype-text-input,.prototype-artifact-resizer').forEach(el=>el.remove());
+  else if(projectExtension?.renderOverlays)projectExtension.renderOverlays({n,stage,frame:frames[current],current,mode,pageScale},()=>renderPageHotspots(n,stage));
   else{stage.querySelectorAll('.hotspot,.pin,.capture').forEach(el=>el.remove());renderPageHotspots(n,stage);}
   if(experience)return;
   const ann=model.annotations.filter(a=>a.node===current);ann.forEach((a,i)=>{const point=positions[current]?.[a.id]||(!a.selector?a.point:null);if(a.imagePath&&a.imagePath!==n.path){missing.add(a.id);return;}if(a.imagePath)missing.delete(a.id);if(!point)return;const b=document.createElement('button');b.className=`pin ${point[1]*stage.clientHeight<36?'below':''} ${selected?.id===a.id?'selected':''}`;b.dataset.pin=a.id;b.textContent=i+1;b.setAttribute('aria-label',`${readonly?'查看':'编辑'}标记 ${i+1}`);b.title=`${readonly?'查看':'编辑'}标记 ${i+1}`;b.style.left=point[0]*100+'%';b.style.top=point[1]*100+'%';b.onclick=()=>selectAnnotation(a.id);stage.append(b);});
@@ -892,4 +894,4 @@ async function refreshSources(){
   }catch{/* 本地服务暂不可用，已编辑内容留在内存，保存操作负责提示与重试。 */}
   finally{sourceRefreshFlight=false;}
 }
-try{if(boot.bundle){bundle=boot.bundle;model=bundle.model;flowContext=clone(model.contextDefaults||{});baseModel=clone(model);}else await reload(false);loadedRuntimeVersion??=bundle.runtimeVersion;let restored=null;try{restored=restoreView(model,JSON.parse(localStorage.getItem(viewKey())||'null'));}catch{}moduleId=restored?.moduleId||model.entryModule||model.modules[0]?.id;current=restored?.current||null;selected=current?{type:'node',id:current}:null;if(restored){camera=restored.camera||camera;cameras=restored.cameras;flowContext=restored.flowContext;linesHidden=restored.linesHidden;documentView.restorePosition(restored.documentPosition);if(restored.view){documentMode=restored.view==='document';experience=restored.view==='prototype';}}if(documentMode){documentView.enter();renderAll();}else if(experience){experience=false;startExperience(restored?.activeFlow||boot.flow);if(restored?.view==='prototype'&&restored.current){flowContext=restored.flowContext;openNode(restored.current,true,{asPage:true});}}else{renderAll();if(!current&&!restored?.camera)fit();}viewReady=true;restoreRuntimeView();saveView();if(!readonly){setInterval(refreshSources,3500);}}catch(error){notice('无法打开工作台：'+error.message,[['重试',()=>location.reload()]]);}
+try{if(boot.bundle){bundle=boot.bundle;model=bundle.model;flowContext=clone(model.contextDefaults||{});baseModel=clone(model);}else await reload(false);loadedRuntimeVersion??=bundle.runtimeVersion;let restored=null;try{restored=restoreView(model,JSON.parse(localStorage.getItem(viewKey())||'null'));}catch{}moduleId=restored?.moduleId||model.entryModule||model.modules[0]?.id;current=restored?.current||null;selected=current?{type:'node',id:current}:null;if(restored){camera=restored.camera||camera;cameras=restored.cameras;flowContext=restored.flowContext;linesHidden=restored.linesHidden;documentView.restorePosition(restored.documentPosition);if(restored.view){documentMode=restored.view==='document';experience=restored.view==='prototype';}}if(documentMode){documentView.enter();renderAll();}else if(experience){experience=false;startExperience(restored?.activeFlow||boot.flow);if(restored?.view==='prototype'&&restored.current){flowContext=restored.flowContext;openNode(restored.current,true,{asPage:true,restore:true});}}else{renderAll();if(!current&&!restored?.camera)fit();}viewReady=true;restoreRuntimeView();saveView();if(!readonly){setInterval(refreshSources,3500);}}catch(error){notice('无法打开工作台：'+error.message,[['重试',()=>location.reload()]]);}

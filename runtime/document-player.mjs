@@ -1,5 +1,5 @@
 import {prototypeDocument,thumbnailHTML,bindNativeDocument,cleanContext,bindDocumentCanvasGestures} from './player.mjs';
-import {expandHTML,eligibleEdges,nextContext,wheelZoomFactor} from './core.mjs';
+import {expandHTML,eligibleEdges,nextContext,initialNodeContext,wheelZoomFactor} from './core.mjs';
 
 export function documentPrototypeLayout(node,availableWidth,rect,height,{maxWidth=960,maxHeight=560,frameScale=1}={}) {
   const contentWidth=rect?rect[2]+24:node.width,contentHeight=rect?rect[3]+24:node.height;
@@ -17,7 +17,7 @@ export function constrainDocumentCamera(camera,layout){
 }
 // 每个文档嵌入项拥有自己的播放上下文，翻页和输入不会改写文档或其他嵌入项。
 export function mountDocumentPrototype(host, initialNode, viewport, block) {
-  let node=initialNode,context={...host.model().contextDefaults},frame,stage,focusRect,disposed=false,pageScale=1,layout,camera,fitted=true,tools,zoomLabel,hand=false,space=false,drag=null,unbindFrame;
+  let node=initialNode,context=initialNodeContext(host.model().contextDefaults,initialNode),frame,stage,focusRect,disposed=false,pageScale=1,layout,camera,fitted=true,tools,zoomLabel,hand=false,space=false,drag=null,unbindFrame;
   let frameScale=block.frameScale??1,savedFrameScale=frameScale,frameDrag=null;
   const bridgeToken=globalThis.crypto.randomUUID();
   const paint=()=>{
@@ -96,7 +96,7 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
   const key=event=>{if(event.code!=='Space'||event.type==='keydown'&&event.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;space=event.type==='keydown';if(space&&viewport.matches(':hover'))event.preventDefault();paint();};
   const blur=()=>{space=false;drag=null;finishFrameResize(true);paint();};
   window.addEventListener('keydown',key);window.addEventListener('keyup',key);window.addEventListener('blur',blur);
-  const navigate=id=>{if(disposed)return;const target=host.model().nodes.find(n=>n.id===id&&n.kind!=='note');if(target){node=target;render();}};
+  const navigate=id=>{if(disposed)return;const target=host.model().nodes.find(n=>n.id===id&&n.kind!=='note');if(target){node=target;context=initialNodeContext(context,node);render();}};
   // 扩展拥有长期绑定到本嵌入项的宿主；异步回调也不会跳到画布或其他预览。
   const extension=host.createExtension?.({
     getState:()=>({model:host.model(),n:node,current:node.id,frames:frame?{[node.id]:frame}:{},frame,pageScale,experience:true,mode:null}),
@@ -122,12 +122,12 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
     const html=expandHTML(host.bundle().resources[node.id]||'',host.bundle().fragments||{});
     frame=document.createElement('iframe');frame.title=node.title;frame.style.width=node.width+'px';frame.style.height=node.height+'px';frame.style.transformOrigin='0 0';
     if(extension?.declarative){frame.setAttribute('sandbox','allow-same-origin');frame.srcdoc=thumbnailHTML(html);}
-    else{frame.setAttribute('sandbox','allow-scripts');frame.srcdoc=prototypeDocument(html,{token:bridgeToken,width:node.width,height:node.height,context,edges:outgoing().map(({id,selector})=>({id,selector})),annotations:[],documentCanvas:true,focusSelector:node.id===initialNode.id?block.selector:undefined});}
+    else{frame.setAttribute('sandbox','allow-scripts');frame.srcdoc=prototypeDocument(html,{token:bridgeToken,width:node.width,height:node.height,context,edges:outgoing().map(({id,selector,when})=>({id,selector,when})),annotations:[],documentCanvas:true,focusSelector:node.id===initialNode.id?block.selector:undefined});}
     const mountedFrame=frame;
     frame.onload=()=>{
       if(disposed||frame!==mountedFrame||!frame.isConnected)return;
-      if(extension?.declarative){unbindFrame=bindDocumentCanvasGestures(frame.contentDocument,data=>gesture(data,true),{frame:true});scoped(()=>{extension.layout?.(frame.contentDocument,node);extension.mount?.(frame.contentDocument,node);});
-        bindNativeDocument(frame.contentDocument,{getEdges:()=>scoped(()=>extension.outgoing?extension.outgoing(outgoing(),frame.contentDocument,node.id):outgoing()),follow,onInput:(event,type)=>scoped(()=>extension.nativeInput?.(event,type)),onKeyDown:event=>scoped(()=>extension.nativeKeyDown?.(event))});
+      if(extension?.declarative){unbindFrame=bindDocumentCanvasGestures(frame.contentDocument,data=>gesture(data,true),{frame:true});scoped(()=>{extension.layout?.(frame.contentDocument,node);extension.mount?.(frame.contentDocument,node,{interactive:true,surface:'document',context:cleanContext(context)});});
+        bindNativeDocument(frame.contentDocument,{getEdges:()=>eligibleEdges(scoped(()=>extension.outgoing?extension.outgoing(outgoing(),frame.contentDocument,node.id):outgoing()),context),follow,onInput:(event,type)=>scoped(()=>extension.nativeInput?.(event,type)),onKeyDown:event=>scoped(()=>extension.nativeKeyDown?.(event))});
         componentBounds();if(block.selector&&typeof MutationObserver!=='undefined'){componentObserver=new MutationObserver(componentBounds);componentObserver.observe(frame.contentDocument.body,{subtree:true,attributes:true,childList:true});}
       }
       resize();

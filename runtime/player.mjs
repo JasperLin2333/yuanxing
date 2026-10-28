@@ -143,7 +143,7 @@ export function pageBridge(config) {
     const clicked = event.target.closest?.('button,a,input,[data-yx-action],[data-yx-id]') || event.target;
     if (clicked.disabled || clicked.getAttribute?.('aria-disabled') === 'true') return;
     collect();
-    const matches = config.edges.filter(edge => edge.selector && (() => { try { return !!event.target.closest(edge.selector); } catch { return false; } })());
+    const matches = config.edges.filter(edge => edge.selector && Object.entries(edge.when || {}).every(([key,value]) => context[key] === value) && (() => { try { return !!event.target.closest(edge.selector); } catch { return false; } })());
     if (matches.length) {
       const form = clicked.closest?.('form');
       if (form && clicked.type === 'submit' && !form.checkValidity()) { event.preventDefault(); form.reportValidity(); return; }
@@ -165,6 +165,8 @@ export function pageBridge(config) {
     else if (element.type === 'radio') element.checked = element.value === String(context[key]);
     else element.value = String(context[key]);
   }
+  // 初始可见性只在进入时应用，后续可由页面操作自由改变。
+  for (const element of queryAll('[data-yx-initial-visible]')) element.hidden = String(context[element.dataset.yxInitialVisible] ?? '') !== element.dataset.yxValue;
   paint(); measure();
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measure).observe(document.body);
   if (config.focusSelector && typeof MutationObserver !== 'undefined') new MutationObserver(measure).observe(document.body,{subtree:true,childList:true,attributes:true});

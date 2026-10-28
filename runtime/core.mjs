@@ -16,6 +16,8 @@ export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => 
 const isFlowContext = value => value!==null&&typeof value==='object'&&!Array.isArray(value)&&Object.entries(value).every(([key,item])=>/^[A-Za-z][\w-]*$/.test(key)&&(['string','boolean'].includes(typeof item)||typeof item==='number'&&Number.isFinite(item)));
 export const eligibleEdges = (edges,context={}) => edges.filter(edge=>!edge.diagram&&Object.entries(edge.when||{}).every(([key,value])=>context[key]===value));
 export const nextContext = (context,edge) => ({...context,...edge.setContext});
+// 节点初值仅在进入时覆盖显式字段，未声明的沿用当前上下文。
+export const initialNodeContext = (context,node) => ({...context,...node?.initialContext});
 export const connectionSides = ['top','right','bottom','left'];
 export const isBranch = node => node?.kind==='note'&&node.presentation==='branch';
 export const canvasNodeType = node => nodeCardType(node);
@@ -421,6 +423,7 @@ export function validate(model) {
     if (!['html','image','note'].includes(n.kind)) errors.push(`页面类型不正确：${n.title}`);
     if (![n.width,n.height].every(v => Number.isFinite(v) && v > 0 && v <= 20000)) errors.push(`页面尺寸不正确：${n.title}`);
     if(n.canvasType!==undefined&&!['pc','mobile'].includes(n.canvasType))errors.push(`节点类型不正确：${n.title}`);
+    if(n.initialContext!==undefined&&!isFlowContext(n.initialContext))errors.push(`页面初始状态不正确：${n.title}`);
     if (![n.x,n.y].every(Number.isFinite)) errors.push(`画布位置不正确：${n.title}`);
     if (n.rule && typeof model.rules?.[n.rule]!=='string') errors.push(`页面规则不存在：${n.title}`);
     if(n.summary!==undefined&&typeof n.summary!=='string')errors.push(`页面核心说明不正确：${n.title}`);

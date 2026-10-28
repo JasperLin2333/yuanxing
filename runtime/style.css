@@ -233,7 +233,8 @@ textarea{min-height:112px;resize:vertical}
 #page-stage.note-stage{overflow:hidden}
 #page-stage.note-stage .note-preview{position:absolute;left:0;top:0;height:auto;max-height:none;overflow:visible;transform-origin:0 0}
 .hotspot{position:absolute;min-height:0;cursor:pointer;background:transparent;border:0;border-radius:0;padding:0}
-.hotspot:hover,.hotspot:focus-visible{background:var(--selected);background-color:#00B8310D;outline:2px solid var(--green);outline-offset:0}
+.hotspot:hover{background:transparent}
+.hotspot:focus-visible{outline:2px solid #59616d;outline-offset:0}
 .pin{position:absolute;z-index:4;display:block;width:24px;height:24px;min-height:0;padding:0;border:1px solid white;border-radius:50%;background:#2F85F9;color:white;text-align:center;transform:translate(-50%,-150%);font-size:12px;line-height:22px;box-shadow:0 0 8px rgba(0,0,0,.14)}
 .pin:hover{background:#2F85F9;color:white}
 .pin.selected{background:var(--green);outline:3px solid var(--selected)}
@@ -316,7 +317,6 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .experience #sidebar,.experience #inspector,.experience .panel-toggle,.experience #edit-tools,.experience #export-menu,.experience .zoom-tools,.experience .viewer-toolbar,.experience #module-title{display:none!important}
 .experience #page-viewport{padding:20px;min-height:0}
 .experience #project-title{max-width:40%}
-.experience .hotspot:hover{background:transparent;outline:none}
 
 /* 两种视图的切换始终可见。 */
 #view-switch{display:flex;flex:none;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--radius);background:var(--soft)}

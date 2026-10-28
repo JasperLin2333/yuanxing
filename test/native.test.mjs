@@ -21,6 +21,21 @@ test('未绑定输入保留原生行为；禁用控件不跳转；表单校验�
 });
 test('完整原型跳过外层热点与替身表单，评审仍保留原有打点机制',async()=>{
   const source=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),controller=source.slice(source.indexOf('function renderOverlays(){'),source.indexOf('function renderPageHotspots('));let removed=0,overlays=0;
-  const stage={querySelectorAll:()=>[{remove(){removed++;}}]},state={devMode:false,updateAnnotationButton(){},current:'home',node:()=>({kind:'html'}),$:()=>stage,experience:true,projectExtension:{nativeInteraction:true,renderOverlays(){overlays++;}},frames:{},mode:null,pageScale:.65};
+  const stage={querySelectorAll:()=>[{remove(){removed++;}}]},state={devMode:false,updateAnnotationButton(){},current:'home',node:()=>({kind:'html'}),$:()=>stage,experience:true,projectExtension:{declarative:true,nativeInteraction:true,renderOverlays(){overlays++;}},frames:{},mode:null,pageScale:.65};
   vm.runInContext(controller,vm.createContext(state));state.renderOverlays();assert.equal(removed,1);assert.equal(overlays,0);
+});
+
+test('打开节点时真实控件不被代理层覆盖，批注和打点仍可用',async()=>{
+  const source=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),controller=source.slice(source.indexOf('function renderOverlays(){'),source.indexOf('function renderPageHotspots('));
+  let projectOverlays=0,removed=0,positioned=0;const appended=[];
+  const stage={clientHeight:800,querySelectorAll:()=>[{remove(){removed++;}}],append:el=>appended.push(el)};
+  const document={createElement:()=>({style:{},dataset:{},setAttribute(){}})};
+  const state={document,devMode:false,updateAnnotationButton(){},current:'form',node:()=>({kind:'html'}),$:()=>stage,experience:false,projectExtension:{declarative:true,nativeInteraction:true,nodeNativeInteraction:true,renderOverlays(){projectOverlays++;}},frames:{},mode:'annotate',pageScale:1,model:{annotations:[{id:'a',node:'form',point:[.4,.5]}]},positions:{},missing:new Set(),readonly:false,selected:null,capturePoint(){},positionAnnotationEditor(){positioned++;}};
+  vm.runInContext(controller,vm.createContext(state));state.renderOverlays();
+  assert.equal(removed,1);assert.equal(projectOverlays,0);assert.equal(appended.length,2);assert.match(appended[0].className,/pin/);assert.equal(appended[1].className,'capture');assert.equal(positioned,1);
+});
+test('旧声明式扩展未声明节点原生交互时仍使用原来的代理层',async()=>{
+  const source=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),controller=source.slice(source.indexOf('function renderOverlays(){'),source.indexOf('function renderPageHotspots('));
+  let overlays=0;const stage={querySelectorAll:()=>[],append(){}},state={devMode:false,updateAnnotationButton(){},current:'home',node:()=>({kind:'html'}),$:()=>stage,experience:false,projectExtension:{declarative:true,nativeInteraction:true,renderOverlays(){overlays++;}},frames:{},mode:null,pageScale:1,model:{annotations:[]},positionAnnotationEditor(){}};
+  vm.runInContext(controller,vm.createContext(state));state.renderOverlays();assert.equal(overlays,1);
 });

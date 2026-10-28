@@ -16,6 +16,19 @@ const libraryIsPage=n=>!(n.kind==='note'&&n.presentation==='branch');
 const libraryCompareNodes=(a,b)=>(a.y||0)-(b.y||0)||(a.x||0)-(b.x||0);
 const librarySearchable=(value,query)=>String(value||'').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 
+// 缩略图只渲染进入时的状态；此函数不安装事件，也不修改真实页面。
+export function initializeCanvasThumbnail(doc,context={}){
+  for(const element of doc.querySelectorAll('[data-yx-bind]')){
+    const key=element.dataset.yxBind;if(!(key in context))continue;
+    if(element.type==='checkbox')element.checked=!!context[key];
+    else if(element.type==='radio')element.checked=element.value===String(context[key]);
+    else element.value=String(context[key]);
+  }
+  for(const element of doc.querySelectorAll('[data-yx-initial-visible]'))element.hidden=String(context[element.dataset.yxInitialVisible]??'')!==element.dataset.yxValue;
+  for(const element of doc.querySelectorAll('[data-yx-text]'))element.textContent=String(context[element.dataset.yxText]??'');
+  for(const element of doc.querySelectorAll('[data-yx-visible]'))element.hidden=String(context[element.dataset.yxVisible]??'')!==element.dataset.yxValue;
+}
+
 // 保留仍在画布上的节点 DOM；移动已有 iframe 会让浏览器重新加载原型。
 export function reconcileCanvasCards(host,nodes,render){
   const existing=new Map([...host.children].map(card=>[card.dataset.id,card])),wanted=new Set(nodes.map(n=>n.id));

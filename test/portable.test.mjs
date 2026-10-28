@@ -8,7 +8,7 @@ import {spawnSync} from 'node:child_process';
 import {Readable} from 'node:stream';
 import {fileURLToPath} from 'node:url';
 import {createStore,standalone,createHandler,safePath} from '../runtime/server.mjs';
-import {validate,exportSubset,removeNodes,eligibleEdges,History,clone} from '../runtime/core.mjs';
+import {validate,exportSubset,removeNodes,eligibleEdges,initialNodeContext,History,clone} from '../runtime/core.mjs';
 import {flowEntries,cleanContext,prototypeDocument,thumbnailHTML,pageBridge} from '../runtime/player.mjs';
 import {inlineHTML} from '../runtime/resources.mjs';
 import {run} from '../scripts/yuanxing.mjs';
@@ -115,4 +115,29 @@ test('真实运行页面桥：跨页输入恢复，点击提交携带当前字�
 });
 test('真实运行页面桥：声明式局部弹窗与普通批注相互独立',()=>{
   const f=bridgeFixture(),panel={hidden:true},button={dataset:{yxAction:'show',yxTarget:'#dialog'},disabled:false,getAttribute:()=>null,closest:selector=>selector==='[data-yx-action]'?button:null};f.targets.set('#dialog',panel);f.run({});f.listeners.click({target:button,preventDefault(){}});assert.equal(panel.hidden,false);assert(!f.messages.some(message=>message.type==='follow'));
+});
+
+test('同一页面的节点初值只初始化表单与弹窗一次，后续关闭和输入不会恢复初始状态',()=>{
+  const f=bridgeFixture(),field={dataset:{yxBind:'customer'},value:'',type:'text'},panel={dataset:{yxInitialVisible:'dialog',yxValue:'open'},hidden:true};
+  const close={dataset:{yxAction:'hide',yxTarget:'#dialog'},disabled:false,getAttribute:()=>null,closest:selector=>selector==='[data-yx-action]'?close:null};
+  f.fields.push(field);f.targets.set('[data-yx-initial-visible]',panel);f.targets.set('#dialog',panel);f.run({context:{customer:'许安',dialog:'open'}});
+  assert.equal(field.value,'许安');assert.equal(panel.hidden,false);
+  f.listeners.click({target:close,preventDefault(){}});assert.equal(panel.hidden,true);
+  field.value='顾言';f.listeners.input();assert.equal(panel.hidden,true,'输入不会重新应用初始可见状态');
+});
+
+
+test('节点初值仅覆盖显式上下文，不改变来源并校验数据格式',async t=>{
+  const model=(await(await createStore(await sample(t))).readModel()).model,base={role:'admin',customer:'顾言'},node=model.nodes[0];
+  node.initialContext={dialog:'open',role:'member'};assert.deepEqual(initialNodeContext(base,node),{role:'member',customer:'顾言',dialog:'open'});assert.deepEqual(base,{role:'admin',customer:'顾言'});assert.deepEqual(validate(model),[]);
+  node.initialContext={dialog:['open']};assert(validate(model).some(message=>message.includes('页面初始状态不正确')));
+});
+
+test('条件不匹配的流程边不拦截本地关闭操作，条件匹配后仍可跳转',()=>{
+  const f=bridgeFixture(),role={dataset:{yxBind:'role'},value:'admin',type:'text'},panel={hidden:false};
+  const close={dataset:{yxAction:'hide',yxTarget:'#dialog'},disabled:false,getAttribute:()=>null,closest:selector=>selector==='#close'||selector==='[data-yx-action]'?close:null};
+  f.fields.push(role);f.targets.set('#dialog',panel);f.run({context:{role:'admin'},edges:[{id:'member-close',selector:'#close',when:{role:'member'}}]});
+  let stopped=0;f.listeners.click({target:close,preventDefault(){},stopImmediatePropagation(){stopped++;}});assert.equal(panel.hidden,true);assert.equal(stopped,0);assert(!f.messages.some(message=>message.type==='follow'));
+  panel.hidden=false;role.value='member';f.listeners.input();f.listeners.click({target:close,preventDefault(){},stopImmediatePropagation(){stopped++;}});
+  assert.equal(panel.hidden,false);assert.equal(stopped,1);assert.equal(f.messages.find(message=>message.type==='follow').ids[0],'member-close');
 });

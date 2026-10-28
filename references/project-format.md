@@ -41,6 +41,7 @@
 - 节点或模块可用 `sources: ["artifact/modules/example.html", "scripts/example.mjs"]` 声明实际编辑源，路径相对项目根目录，节点声明优先。只记录已核对的源文件；生成页的 `path` 仍是预览来源，不能当作手改目标。`locate` 用现有编排与文档引用现场定位，不维护另一份索引。
 - `locate --root <目录> --query <关键词>` 默认输出页面、去重编辑源及正文行号；`--module`、`--limit` 可收窄范围。需要 `preview`、`render` 等完整元数据时加 `--json`，返回原有结构化结果。定位和 `help` 不载入服务或布线引擎。
 - `canvasType: "pc" | "mobile"` 只决定卡片类型。移动 HTML 可按尺寸自动识别。
+- 页面节点可设置 `initialContext: {"dialog":"open"}`。直接打开时以项目 `contextDefaults` 为基础；沿流程进入时保留已有上下文和连线的 `setContext`，再覆盖节点明确指定的键。只在进入时应用，未声明的键保持不变。文档嵌入项独立应用；离线沿用相同机制。
 - `canvas: false` 将仍需播放的操作状态与画布展示分开，不出现在画布或回收站，导出时保留；Agent 可用它保存交互需要的中间状态。
 - `overview: false` 且未设置 `canvas: false` 的普通节点进入回收站；导出时排除这些节点及关联连线、批注与专属资源。仍需在原型中跳转的状态应同时设置 `canvas: false`；需要归并到可见页面时使用 `overviewAlias`。
 - 模块只用于画布组织。没有 `experiences` 时，完整原型从 `entryModule` 的首个有效页面进入，合并全部模块；既有 `modules[].entry` 仅作为兼容的入口线索，不提供手动设置按钮。
@@ -76,8 +77,9 @@
 - `tab` 仅展示目标面板，其余 `data-yx-group` 匹配的面板隐藏；同组按钮更新 `active` 和 `aria-selected`。
 - `set` 配合 `data-yx-key / data-yx-value` 设置演示上下文的字符串值。
 - `data-yx-bind` 把输入值保存在本次体验的上下文中，跨页保留；复选框为布尔值。`data-yx-text` 展示对应值；`data-yx-visible="role" data-yx-value="admin"` 按值控制显示。
+- 对只需初始化一次的弹窗或面板，用 `data-yx-initial-visible="dialog" data-yx-value="open"`：进入时按上下文决定是否隐藏，之后交给页面交互控制，不会因输入或局部操作恢复初始显示。可配合 `data-yx-bind` 初始化输入值。不同节点可引用同一 HTML 并提供不同初值。
 - 上下文键使用英文字母开头的字母、数字、下划线或连字符。仅允许字符串、布尔值和有限数字。
-- 产品或平台切换时使用其默认演示上下文；跨页跳转保留已绑定字段。工作台不提供“重新开始”操作。
+- 产品或平台切换时使用其默认演示上下文；跨页跳转保留已绑定字段。工作台不提供“重新开始”操作。普通 HTML 脚本需要使用上述声明式属性或由项目自身实现状态初始化；项目声明式扩展可在 `mount` 的 `options.context` 中读取当前上下文。研发基础格式保存每个节点的初值，但不具备跨状态上下文传递协议，对应限制在扩展数据中标记。
 
 ## 更新说明
 
@@ -171,11 +173,12 @@ node scripts/yuanxing.mjs export --root ./my-project --extension ./my-project/ex
 | 属性或函数 | 用途 |
 | --- | --- |
 | `declarative: true` | 使用禁止页面脚本的声明式页面，与清单中的设置保持一致 |
-| `nativeInteraction: true` | 完整原型直接使用声明式 iframe 内的真实控件，停用外层透明热点与替身输入框；评审画布继续使用原有打点机制 |
+| `nativeInteraction: true` | 完整原型使用声明式 iframe 内的真实控件；扩展需在 `mount` 中绑定页面行为 |
+| `nodeNativeInteraction: true` | 与 `nativeInteraction: true` 同时启用时，打开的 HTML 节点使用真实控件，不再使用交互用外层热点与替身输入框；评审批注及打点、绑定区域仍可用。旧扩展未启用时沿用原代理机制 |
 | `nativeInput(event, type)` / `nativeKeyDown(event)` | 原生输入、change 与键盘事件；页面内跳转由内核直接绑定实际元素 |
 | `styles` | 扩展的控件样式 |
 | `bindHotspots: false` | 项目自行维护控件绑定时，收起通用点击区域编辑入口 |
-| `layout(doc, node)` / `mount(doc, node)` | 排版缩略图、挂载打开后的页面 |
+| `layout(doc, node)` / `mount(doc, node, options)` | 排版缩略图、挂载打开后的页面；`options.interactive` 表示是否使用原生交互，`options.surface` 为 `node`、`prototype` 或 `document`，`options.context` 是进入时的上下文副本。缩略图不调用 `mount`，旧扩展可忽略第三个参数 |
 | `outgoing(edges, doc, id)` | 合并项目声明的页面操作 |
 | `travel(edge)` | 处理扩展操作；返回 `true` 表示已处理 |
 | `renderOverlays(info, renderHotspots)` | 绘制项目表单或局部控件，调用 `renderHotspots()` 复用通用热点 |

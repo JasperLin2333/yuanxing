@@ -61,6 +61,8 @@ function compatUpdateTags(html,marks) {
 function compatLocalActions(defaults) {
   let context={...defaults};const all=selector=>{try{return [...document.querySelectorAll(selector)];}catch{return [];}};
   const paint=()=>{for(const element of all('[data-yx-text]'))element.textContent=String(context[element.dataset.yxText]??'');for(const element of all('[data-yx-visible]'))element.hidden=String(context[element.dataset.yxVisible]??'')!==element.dataset.yxValue;};
+  for(const element of all('[data-yx-bind]')){const key=element.dataset.yxBind;if(!(key in context))continue;if(element.type==='checkbox')element.checked=!!context[key];else if(element.type==='radio')element.checked=element.value===String(context[key]);else element.value=String(context[key]);}
+  for(const element of all('[data-yx-initial-visible]'))element.hidden=String(context[element.dataset.yxInitialVisible]??'')!==element.dataset.yxValue;
   document.addEventListener('input',event=>{const element=event.target;if(element.dataset?.yxBind){context[element.dataset.yxBind]=element.type==='checkbox'?element.checked:element.value;paint();}});
   document.addEventListener('click',event=>{const element=event.target.closest?.('[data-yx-action]');if(!element||element.disabled)return;const action=element.dataset.yxAction,targets=all(element.dataset.yxTarget||'');if(['show','hide','toggle'].includes(action)){event.preventDefault();for(const target of targets)target.hidden=action==='toggle'?!target.hidden:action==='hide';}else if(action==='tab'){event.preventDefault();for(const target of all(element.dataset.yxGroup||'[data-yx-panel]'))target.hidden=!targets.includes(target);for(const sibling of element.parentElement.querySelectorAll('[data-yx-action="tab"]')){sibling.classList.toggle('active',sibling===element);sibling.setAttribute('aria-selected',String(sibling===element));}}else if(action==='set'&&element.dataset.yxKey){context[element.dataset.yxKey]=element.dataset.yxValue||'';paint();}});
   paint();
@@ -75,7 +77,7 @@ function compatPageHtml(html,marks,defaults) {
   const removals=compatElements(html).map(element=>({element,tag:html.slice(element.start,element.end).replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,'')})).sort((a,b)=>b.element.start-a.element.start);
   for(const {element,tag} of removals)html=html.slice(0,element.start)+tag+html.slice(element.end);
   let script=handlers.map(({id,event,code})=>`document.querySelector('[data-yuanxing-handler="${id}"]').addEventListener(${JSON.stringify(event)},function(event){const result=(function(event){${code}\n}).call(this,event);if(result===false)event.preventDefault();});`).join('\n');
-  if(/data-yx-(?:action|bind|text|visible)/.test(html))script+=`\n(${compatLocalActions.toString()})(${JSON.stringify(defaults||{}).replace(/</g,'\\u003c')});`;
+  if(/data-yx-(?:action|bind|text|visible|initial-visible)/.test(html))script+=`\n(${compatLocalActions.toString()})(${JSON.stringify(defaults||{}).replace(/</g,'\\u003c')});`;
   if(script){const addition='<script>'+script.replace(/<\/script/gi,'<\\/script')+'</script>';html=/<\/body\s*>/i.test(html)?html.replace(/<\/body\s*>/i,addition+'</body>'):html+addition;}
   return html;
 }
@@ -124,7 +126,9 @@ export function createCompatibilityBundle(bundle) {
         else marks.set(element,{'data-transition-id':transitionIds.get(targetEdges[0].id)});
       }
       for(const {element,texts} of logicByElement.values()){const id='L'+(requirement.logic.length+1);requirement.logic.push({id,text:texts.join('\n\n')});if(element)marks.set(element,{...marks.get(element),'data-logic-id':id});}
-      files[filename]=compatPageHtml(html,marks,model.contextDefaults);
+      files[filename]=compatPageHtml(html,marks,{...model.contextDefaults,...node.initialContext});
+      // 基础研发格式没有跨状态上下文协议，完整条件与原始节点仍保留在 yuanxing.model。
+      if(node.initialContext&&groupEdges.some(edge=>edge.to===node.id))limitations.push({type:'initial-context-flow',node:node.id});
     }
     if(documentText.general.length)requirement.logic.push({id:'L'+(requirement.logic.length+1),text:documentText.general.join('\n\n')});
     manifest.requirements.push(requirement);
