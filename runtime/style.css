@@ -405,3 +405,16 @@ blockquote.doc-text{border-left:3px solid #b6c8bc;margin:8px 0;padding:6px 16px;
 @media(max-width:900px){#document-view:not(.doc-outline-collapsed){grid-template-columns:180px minmax(0,1fr)}.doc-outline{padding-left:8px;padding-right:8px}}
 
 .doc-text h1,.doc-text h2{font-size:24px;line-height:1.6;margin:26px 0 12px}.doc-text h3{font-size:20px;line-height:1.6;margin:22px 0 10px}.doc-text h4{font-size:17px;line-height:1.6;margin:18px 0 8px}.doc-text h5,.doc-text h6{font-size:15px;line-height:1.7;margin:16px 0 6px}
+
+/* 项目更新说明在编辑端与离线分享中共用。 */
+.updates-trigger{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.updates-dot{width:7px;height:7px;border-radius:50%;background:#f05b54}.updates-dot[hidden]{display:none}
+.updates-dialog{width:min(560px,calc(100vw - 32px));max-height:min(680px,calc(100vh - 48px));padding:0;border:0;border-radius:12px;background:#fff;color:#242831;box-shadow:0 16px 48px #0003}
+.updates-dialog::backdrop{background:#12182466}.updates-dialog header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid #edf0f2}
+.updates-dialog h2{margin:0;font-size:18px}.updates-close{font-size:24px;line-height:1;color:#7c838b}
+.updates-content{overflow:auto;max-height:calc(min(680px,100vh - 48px) - 64px);padding:20px 24px 24px}
+.updates-content section+section{margin-top:24px}.updates-content h3{margin:0 0 12px;font-size:14px;color:#737d87}
+.updates-content ul{margin:0;padding-left:20px}.updates-content li{padding:0 0 12px;line-height:1.7;font-size:14px}
+.updates-link{margin-left:8px;padding:0;color:#008c54;font-size:13px;white-space:nowrap}.updates-link:hover{text-decoration:underline}
+.updates-empty{margin:0;color:#737d87;font-size:14px}
+@media(max-width:720px){.updates-trigger{font-size:12px;padding:4px}.updates-content{padding:16px}}

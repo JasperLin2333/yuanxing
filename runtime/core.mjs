@@ -405,6 +405,14 @@ export function validate(model) {
   const errors = [], ids = new Set(), modules = new Set();
   if (model.version !== 1 || !Array.isArray(model.modules) || !Array.isArray(model.nodes) || !Array.isArray(model.edges) || !Array.isArray(model.annotations)) return ['工作台数据格式不正确'];
   if(model.contextDefaults!==undefined&&!isFlowContext(model.contextDefaults))errors.push('流程默认条件不正确');
+  if(model.updates!==undefined){
+    const seen=new Set();
+    if(!Array.isArray(model.updates))errors.push('更新说明格式不正确');
+    else for(const update of model.updates){
+      if(!update||typeof update!=='object'||Array.isArray(update)||typeof update.id!=='string'||!update.id||seen.has(update.id)||typeof update.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(update.date)||typeof update.text!=='string'||!update.text.trim()||update.node!==undefined&&typeof update.node!=='string'||update.label!==undefined&&typeof update.label!=='string')errors.push('更新说明格式不正确');
+      if(update?.id)seen.add(update.id);
+    }
+  }
   for (const m of model.modules) { if (!m.id || modules.has(m.id)) errors.push('模块标识重复或为空'); modules.add(m.id);if(m.sections!==undefined&&(!Array.isArray(m.sections)||new Set(m.sections.map(s=>s.id)).size!==m.sections.length||m.sections.some(s=>!s.id||typeof s.title!=='string')))errors.push(`画布分区格式不正确：${m.title}`); }
   for (const n of model.nodes) {
     if (!n.id || ids.has(n.id)) errors.push(`页面标识重复：${n.id}`);
@@ -763,6 +771,8 @@ export function mergeProject(base,local,remote,{prefer='local'}={}){
       }return result;
     }
     const keyed=values=>Array.isArray(values)&&values.every(v=>object(v)&&typeof v.id==='string')&&new Set(values.map(v=>v.id)).size===values.length;
+    // 旧项目没有 updates 字段时，并发新增的首批记录仍逐项合并。
+    if(b===undefined&&path.at(-1)==='updates'&&keyed(l)&&keyed(r))b=[];
     if(keyed(b)&&keyed(l)&&keyed(r)){
       const bm=new Map(b.map(v=>[v.id,v])),lm=new Map(l.map(v=>[v.id,v])),rm=new Map(r.map(v=>[v.id,v]));
       const order=values=>values.map(v=>v.id).filter(id=>bm.has(id)),bo=order(b),lo=order(l),ro=order(r);
