@@ -1,0 +1,22 @@
+// 工作台统一选择器：项目、产品、节点类型和缩放共用同一套菜单与键盘操作。
+let openSelect=null,selectSerial=0;
+export function closeSelects(){openSelect?.close();}
+export function createSelect({label,options=[],value='',display,variant='',placement='bottom',onChange=()=>{}}){
+  const root=document.createElement('div'),trigger=document.createElement('button'),text=document.createElement('span'),chevron=document.createElement('span'),menu=document.createElement('div');
+  root.className=`yx-select ${variant}`.trim();trigger.type='button';trigger.className='yx-select-trigger';trigger.setAttribute('aria-label',label);trigger.setAttribute('aria-haspopup','listbox');trigger.setAttribute('aria-expanded','false');
+  text.className='yx-select-value';chevron.className='chevron';chevron.setAttribute('aria-hidden','true');trigger.append(text,chevron);root.append(trigger);
+  menu.className='yx-select-menu dropdown-menu';menu.id=`yx-select-${++selectSerial}`;menu.setAttribute('role','listbox');menu.setAttribute('aria-label',label);trigger.setAttribute('aria-controls',menu.id);
+  let choices=[],current='',shown=display,disabled=false;
+  function update(){text.textContent=shown??choices.find(item=>item.value===current)?.label??'';trigger.setAttribute('aria-label',text.textContent?`${label}：${text.textContent}`:label);for(const option of menu.children)option.setAttribute('aria-selected',String(option.dataset.value===current));}
+  function setValue(next,nextDisplay){current=String(next);shown=nextDisplay;update();}
+  function setOptions(next){choices=next.map(item=>({value:String(item.value),label:String(item.label)}));menu.replaceChildren();for(const item of choices){const option=document.createElement('button');option.type='button';option.setAttribute('role','option');option.dataset.value=item.value;option.textContent=item.label;option.addEventListener('click',()=>{const changed=current!==item.value;setValue(item.value);close();trigger.focus({preventScroll:true});if(changed)onChange(item.value);});menu.append(option);}update();}
+  function position(){if(!root.isConnected){close();return;}const rect=trigger.getBoundingClientRect();menu.style.minWidth=Math.max(rect.width,120)+'px';menu.style.maxHeight=Math.max(80,innerHeight-16)+'px';menu.style.left=Math.max(8,Math.min(rect.left,innerWidth-menu.offsetWidth-8))+'px';const above=rect.top-menu.offsetHeight-4,below=rect.bottom+4;menu.style.top=Math.max(8,Math.min(placement==='top'&&above>=8?above:below,innerHeight-menu.offsetHeight-8))+'px';}
+  function outside(event){if(!root.contains(event.target)&&!menu.contains(event.target))close();}
+  function close(){if(openSelect!==api)return;openSelect=null;trigger.setAttribute('aria-expanded','false');menu.remove();document.removeEventListener('pointerdown',outside,true);document.removeEventListener('focusin',outside,true);window.removeEventListener('resize',position);document.removeEventListener('scroll',position,true);}
+  function open(focusLast=false){if(disabled||!choices.length)return;closeSelects();openSelect=api;document.body.append(menu);trigger.setAttribute('aria-expanded','true');position();document.addEventListener('pointerdown',outside,true);document.addEventListener('focusin',outside,true);window.addEventListener('resize',position);document.addEventListener('scroll',position,true);const selected=[...menu.children].find(option=>option.dataset.value===current);(focusLast?menu.lastElementChild:selected||menu.firstElementChild)?.focus({preventScroll:true});}
+  function setDisabled(next){disabled=!!next;trigger.disabled=disabled;if(disabled)close();}
+  trigger.addEventListener('click',()=>openSelect===api?close():open());
+  trigger.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();open(event.key==='ArrowUp');}});
+  menu.addEventListener('keydown',event=>{const items=[...menu.children],index=items.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus({preventScroll:true});}else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();trigger.focus({preventScroll:true});}else if(event.key==='Tab')close();});
+  const api={element:root,trigger,setOptions,setValue,setDisabled,close};setOptions(options);setValue(value,display);return api;
+}

@@ -188,8 +188,7 @@ textarea{min-height:112px;resize:vertical}
 .zoom-tools>button,.zoom-tools .tool-icon{display:grid;place-items:center;flex:none;width:32px;height:32px;min-height:32px;padding:6px;color:var(--muted)}
 .zoom-tools .danger{color:var(--danger)}
 .zoom-tools .tool-divider{width:1px;min-width:1px;height:16px;margin:0 4px;background:var(--line)}
-#zoom-label{display:block;width:76px;min-width:76px;height:32px;margin:0;padding:4px 8px;border:1px solid transparent;background:var(--surface);font-size:13px;font-variant-numeric:tabular-nums;cursor:pointer}
-#zoom-label:hover{border-color:var(--border);background:var(--hover)}
+
 .zoom-settings{position:relative}
 .zoom-settings>summary{display:grid;place-items:center;width:32px;height:32px;padding:6px;list-style:none;border-radius:var(--radius);color:var(--muted)}
 .zoom-settings>summary::-webkit-details-marker{display:none}
@@ -305,13 +304,11 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
   .toolbar{overflow-x:auto}
   .zoom-tools{left:12px;bottom:12px;gap:0;max-width:calc(100% - 24px)}
   .zoom-tools>button,.zoom-tools .tool-icon,.zoom-settings>summary{width:28px;min-width:28px}
-  #zoom-label{width:68px;min-width:68px}
 }
 @media(prefers-reduced-motion:reduce){button,.node-port{transition:none}}
 
 /* 完整原型复用全部模块，只在存在不同产品或平台时提供切换。 */
 #experience-tools{display:flex;align-items:center;gap:8px}#experience-tools[hidden]{display:none}
-#experience-flow{min-width:120px;max-width:240px}
 #page-stage>.page-frame{pointer-events:auto}
 .experience .layout{grid-template-columns:minmax(0,1fr)}
 .experience #workspace{grid-column:1}
@@ -325,7 +322,6 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 #view-switch button[aria-pressed="true"]{background:var(--surface);color:var(--selected-ink);box-shadow:0 1px 3px #14141414}
 #view-switch button:disabled{color:var(--disabled)}
 #experience-tools{display:flex;align-items:center;gap:8px}
-#experience-flow{width:auto;min-width:120px;max-width:240px;margin:0}
 
 .declarative-pages #page-stage>.page-frame{pointer-events:none}
 
@@ -334,18 +330,14 @@ dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .toolbar-left,.toolbar-right{display:flex;align-items:center;gap:10px;min-width:0}
 .toolbar-right{justify-content:flex-end}
 .toolbar #project-title{max-width:240px;min-width:0}
-#project-select{max-width:220px;width:auto;min-width:72px;margin:0;padding:4px 24px 4px 8px;border:1px solid transparent;background-color:transparent;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis}
-#project-select:hover{border-color:var(--border);background-color:var(--soft)}
+
 #view-switch{border-radius:8px;border:0;padding:3px;background:#F0F2F5;gap:3px}
 #view-switch button{min-height:30px;padding:4px 18px;border-radius:6px;line-height:22px}
 #view-switch button[aria-pressed="true"]{color:var(--ink);box-shadow:0 1px 4px #1414141A}
-#experience-flow{min-width:80px;max-width:180px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background-color:var(--surface)}
-#experience-flow-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#experience-options{right:0;top:calc(100% + 8px)}
-#experience-options button[aria-checked="true"]{background:var(--selected);color:var(--selected-ink)}
+
 .node-thumb{contain:layout paint}
-@media(max-width:1050px){.toolbar{gap:10px}.toolbar-left,.toolbar-right{gap:4px}.toolbar #project-title,#project-select{max-width:150px}#experience-flow{max-width:140px}#view-switch button{padding:4px 12px}}
-@media(max-width:720px){.toolbar{overflow:visible;gap:6px;padding:0 8px}.toolbar #project-title,#project-select{max-width:100px;font-size:12px}.toolbar-left>.panel-toggle,.toolbar-right>.panel-toggle,#edit-tools{display:none}#view-switch button{padding:4px 8px;font-size:12px}#export-trigger{padding:4px;font-size:12px}#experience-flow{min-width:60px;max-width:95px;font-size:12px}.experience #project-title{max-width:100px}}
+@media(max-width:1050px){.toolbar{gap:10px}.toolbar-left,.toolbar-right{gap:4px}.toolbar #project-title,#project-select{max-width:150px}.yx-select-experience{max-width:140px}#view-switch button{padding:4px 12px}}
+@media(max-width:720px){.toolbar{overflow:visible;gap:6px;padding:0 8px}.toolbar #project-title,#project-select{max-width:100px;font-size:12px}.toolbar-left>.panel-toggle,.toolbar-right>.panel-toggle,#edit-tools{display:none}#view-switch button{padding:4px 8px;font-size:12px}#export-trigger{padding:4px;font-size:12px}.yx-select-experience{min-width:60px;max-width:95px;font-size:12px}.experience #project-title{max-width:100px}}
 
 /* 完整产品直接使用页面内的控件、悬浮态与坐标。 */
 .declarative-pages #page-stage.native-prototype>.page-frame{pointer-events:auto}
@@ -424,3 +416,26 @@ blockquote.doc-text{border-left:3px solid #b6c8bc;margin:8px 0;padding:6px 16px;
 .updates-link{margin-left:8px;padding:0;color:#008c54;font-size:13px;white-space:nowrap}.updates-link:hover{text-decoration:underline}
 .updates-empty{margin:0;color:#737d87;font-size:14px}
 @media(max-width:720px){.updates-trigger{font-size:12px;padding:4px}.updates-content{padding:16px}}
+
+/* 项目、产品、节点类型与缩放使用统一的选择组件。 */
+.yx-select{position:relative;min-width:0}
+.yx-select-trigger{display:flex;justify-content:space-between;gap:8px;width:100%;min-height:32px;padding:5px 9px;border:1px solid var(--border);background:var(--surface);text-align:left}
+.yx-select-trigger:hover{border-color:var(--subtle)}
+.yx-select-trigger[aria-expanded="true"]{border-color:var(--green);outline:2px solid var(--selected);outline-offset:1px}
+.yx-select-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.yx-select-menu{position:fixed;z-index:80;max-width:calc(100vw - 16px);overflow:auto}
+.yx-select-menu button{white-space:normal;overflow-wrap:anywhere}
+.yx-select-menu button[aria-selected="true"]{background:var(--selected);color:var(--selected-ink)}
+.yx-select-project{min-width:72px;max-width:220px}
+.yx-select-project .yx-select-trigger{border-color:transparent;background:transparent;font-size:14px;font-weight:600}
+.yx-select-project .yx-select-trigger:hover{border-color:var(--border);background:var(--soft)}
+.yx-select-experience{min-width:80px;max-width:180px}
+.yx-select-experience .yx-select-trigger{border-radius:6px}
+.select-field{margin:0 0 16px}
+.yx-select-field{margin-top:8px}
+.yx-select-zoom{width:76px;min-width:76px;font-variant-numeric:tabular-nums}
+.yx-select-zoom .yx-select-trigger{border-color:transparent}
+.yx-select-zoom .yx-select-trigger:hover{border-color:var(--border)}
+
+@media(max-width:1050px){.yx-select-experience{max-width:140px}}
+@media(max-width:720px){.yx-select-experience{min-width:60px;max-width:95px;font-size:12px}.yx-select-zoom{width:68px;min-width:68px}}

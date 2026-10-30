@@ -4,6 +4,9 @@ import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {Readable} from 'node:stream';
+import {gunzipSync} from 'node:zlib';
+import {decodeExportArtifact} from '../runtime/export-data.mjs';
+import {offlineExportHTML} from '../runtime/core.mjs';
 import vm from 'node:vm';
 import {clone,validate,exportSubset,exportIssues,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,compactCanvas,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,snapNodePosition,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,connectionDirections,adaptCanvasLayout,isBranch,canvasNodeWidth,canvasNodeHeight,autoLayout,History,markdown,expandHTML,descriptionImagePaths,readDescription,eligibleEdges,nextContext,connectionPoint,connectionPath,connectionRoute,restoreView} from '../runtime/core.mjs';
 import {createStore,createHandler,standalone,safePath} from '../runtime/server.mjs';
@@ -447,7 +450,7 @@ test('同时提交相同版本，仅一份成功',()=>temporary(async root=>{con
 test('源码变化刷新资源，编排和批注位置不变',()=>temporary(async root=>{const store=await setup(root),a=await store.load();await fs.writeFile(path.join(root,'artifact/states/one.html'),'<button id="go">修改后的页面</button>');const b=await store.load();assert.notEqual(a.sourcesSignature,b.sourcesSignature);assert.deepEqual(a.model.annotations,b.model.annotations);assert.deepEqual(a.model.nodes,b.model.nodes);assert.ok(a.resources.one.includes('<script>'));}));
 test('图片上传保存到项目，并能内嵌至分享',()=>temporary(async root=>{const store=await setup(root);const data='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVAAAAABJRU5ErkJggg==';const uploaded=await store.upload({type:'image/png',data});assert.match(uploaded.path,/^assets\/.+\.png$/);const {model,revision}=await store.readModel();model.nodes.push({id:'image',module:'a',title:'截图',kind:'image',path:uploaded.path,width:1,height:1,x:400,y:100});await store.save(model,revision);assert.equal((await store.load()).resources.image,data);await assert.rejects(store.upload({type:'image/png',data:'data:image/png;base64,aHRtbA=='}));}));
 test('越界路径及符号链接拒绝读取',()=>temporary(async root=>{const store=await setup(root);await assert.rejects(safePath(store.artifact,'../secret'));await fs.symlink(os.tmpdir(),path.join(store.artifact,'outside'));await assert.rejects(safePath(store.artifact,'outside','yes'));}));
-test('接口按本机 Host 与会话令牌限制写入，不启动网络服务',()=>temporary(async root=>{const store=await setup(root),handler=createHandler(store,'secret'),data=await store.readModel();assert.equal((await request(handler,'PUT','/api/project',data)).status,403);assert.equal((await request(handler,'GET','/api/project',null,{host:'evil.example'})).status,403);assert.equal((await request(handler,'PUT','/api/project',data,{authorization:'Bearer secret',origin:'https://evil.example'})).status,403);assert.equal((await request(handler,'PUT','/api/project',data,{authorization:'Bearer secret'})).status,200);}));
+test('接口按本机 Host 与会话令牌限制写入，不启动网络服务',()=>temporary(async root=>{const store=await setup(root),handler=createHandler(store,'secret'),data=await store.readModel();assert.equal((await request(handler,'PUT','/api/project',data)).status,403);assert.equal((await request(handler,'GET','/api/project',null,{host:'evil.example'})).status,403);assert.equal((await request(handler,'PUT','/api/project',data,{authorization:'Bearer secret',origin:'https://evil.example'})).status,403);assert.equal((await request(handler,'PUT','/api/project',data,{authorization:'Bearer secret'})).status,200);const select=await request(handler,'GET','/select.mjs');assert.equal(select.status,200);assert.match(select.value,/export function createSelect/);}));
 test('单文件分享无外部资产，内容只读，说明注入安全',()=>temporary(async root=>{const store=await setup(root);const bundle=await store.load();bundle.model.annotations[0].text='</script><img src="https://example.invalid/x">';const html=await standalone(bundle,{module:'a'});assert.match(html,/"readonly":true/);assert.ok(!/<script[^>]+src=/.test(html));assert.ok(!/<link[^>]+href=["'](?!data:)/.test(html));assert.ok(!html.includes('<img src="https://example.invalid'));assert.match(html,/const esc=escapeHTML/);assert.ok(!html.includes('其他说明'));}));
 test('整项目和单模块的两种导出均排除回收站，保留内部交互且不改源项目',async()=>{
   const model=fixture();
@@ -460,13 +463,17 @@ test('整项目和单模块的两种导出均排除回收站，保留内部交�
   model.annotations.push({id:'old-pin',node:'recycled-html',text:'回收站批注'},{id:'old-edge-pin',edge:'to-recycled',text:'回收站连线批注'});
   model.recyclePositions={'recycled-html':{x:60,y:60}};
   const bundle={model,resources:{one:'<button id="go">继续</button>',two:'<p>第二页</p>',internal:'<!-- include:internal -->','recycled-html':'<!-- include:recycled -->','recycled-image':'data:image/png;base64,recycled-only'},fragments:{internal:'<p>内部交互</p>',recycled:'<p>回收站专属页面</p>'},images:{'assets/recycled-only.png':'data:image/png;base64,recycled-only'}},before=clone(bundle);
-  for(const module of [undefined,'a'])for(const view of ['review','prototype']){
+  for(const module of [undefined,'a'])for(const view of ['review','prototype','document']){
     const html=await standalone(bundle,{module,view}),saved=JSON.parse(html.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]).bundle;
     assert.deepEqual(recycleNodes(saved.model),[]);assert(saved.model.nodes.some(n=>n.id==='internal'));
     assert(saved.model.edges.some(e=>e.id==='to-internal'));assert(!saved.model.edges.some(e=>e.id==='to-recycled'));
-    assert(!saved.model.annotations.some(a=>a.id.startsWith('old-')));assert.deepEqual(saved.model.recyclePositions,{});
+    assert(!saved.model.annotations.some(a=>a.id.startsWith('old-')));assert.equal(Object.hasOwn(saved.model,'recyclePositions'),false);
     assert.deepEqual(Object.keys(saved.fragments),['internal']);assert.deepEqual(saved.images,{});
-    assert(!Object.keys(saved.resources).some(id=>id.startsWith('recycled-')));assert(!html.includes('回收站专属页面'));assert.deepEqual(validate(saved.model),[]);
+    assert(!Object.keys(saved.resources).some(id=>id.startsWith('recycled-')));assert.deepEqual(validate(saved.model),[]);
+    assert.doesNotMatch(html,/recycl|回收站/i);
+    const artifact=decodeExportArtifact(JSON.parse(html.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1]),gunzipSync);
+    assert.doesNotMatch(JSON.stringify(artifact),/recycl|回收站/i);
+    for(const nextView of ['review','prototype','document'])assert.doesNotMatch(offlineExportHTML(html,nextView),/recycl|回收站/i);
   }
   assert.deepEqual(bundle,before);
 });
