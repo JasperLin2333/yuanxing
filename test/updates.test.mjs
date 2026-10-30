@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {promises as fs} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {createUpdates} from '../runtime/updates.mjs';
 import {clone,mergeProject,validate,removeNodes} from '../runtime/core.mjs';
 import {createHandler,standalone} from '../runtime/server.mjs';
+import {run} from '../scripts/yuanxing.mjs';
 
 function fixture(){return {version:1,title:'协作项目',entryModule:'main',modules:[{id:'main',title:'主流程',entry:'one'}],nodes:[{id:'one',module:'main',title:'客户列表',kind:'html',path:'pages/one.html',width:1280,height:800,x:0,y:0}],edges:[],annotations:[]};}
 function element(tag='div'){
@@ -43,4 +47,20 @@ test('本地工作台可以读取更新说明模块',async()=>{
   const response={writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=body;}};
   await createHandler({},'token')({method:'GET',url:'/updates.mjs',headers:{host:'127.0.0.1'}},response);
   assert.equal(response.status,200);assert.match(response.headers['Content-Type'],/^text\/javascript/);assert.match(response.body,/function createUpdates/);
+});
+
+test('命令行追加更新说明：校验页面、日期与标识，只改 updates 并保留其他内容',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'yuanxing-updates-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const root=path.join(dir,'项目');await run(['init',root,'--template','iteration']);
+  const file=path.join(root,'artifact/workbench.json'),before=JSON.parse(await fs.readFile(file,'utf8')),node=before.nodes[0].id;
+  const first=await run(['updates','add','--root',root,'--text','旧的变更','--date','2026-01-02']);assert.match(first.id,/^update-2026-01-02-[0-9a-f]{6}$/);
+  await run(['updates','add','--root',root,'--text','  新增页面说明  ','--date','2026-10-29','--node',node,'--label','打开页面','--id','update-new']);
+  const saved=JSON.parse(await fs.readFile(file,'utf8'));assert.deepEqual(saved.updates.map(u=>u.id),['update-new',first.id]);assert.deepEqual(saved.updates[0],{id:'update-new',date:'2026-10-29',text:'新增页面说明',node,label:'打开页面'});
+  assert.deepEqual({...saved,updates:undefined},{...before,updates:undefined});assert.deepEqual(validate(saved),[]);
+  await assert.rejects(run(['updates','add','--root',root,'--text','重复','--id','update-new']),/已存在/);
+  await assert.rejects(run(['updates','add','--root',root,'--text','页面','--node','missing']),/关联页面不存在/);
+  await assert.rejects(run(['updates','add','--root',root,'--text','日期','--date','2026-02-30']),/日期/);
+  await assert.rejects(run(['updates','add','--root',root,'--text','   ']),/不能为空/);
+  const listed=await run(['updates','list','--root',root,'--json']);assert.deepEqual(listed.map(u=>u.date),['2026-10-29','2026-01-02']);
+  assert.equal(JSON.parse(await fs.readFile(file,'utf8')).updates.length,2);
 });

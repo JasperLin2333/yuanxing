@@ -93,6 +93,13 @@
 
 每项使用项目内唯一稳定 `id`、`YYYY-MM-DD` 日期和 `text`；可选 `node` 关联已有页面，`label` 为跳转按钮名称。页面被移除后仍保留历史文字，失效跳转不显示。Agent 按下方并行编辑方法从基线追加记录，保留用户及其他 Agent 的现有修改。
 
+```sh
+node "<Skill目录>/scripts/yuanxing.mjs" updates add --root "<项目目录>" --text "创建专家时增加处理中状态。" --node expert-create --label "创建专家"
+node "<Skill目录>/scripts/yuanxing.mjs" updates list --root "<项目目录>"
+```
+
+`updates add` 默认使用本地当天日期并生成唯一 `id`，可用 `--date`、`--id` 指定；校验关联页面存在，只追加这一条记录，通过共同基线保存，不必手写整份 JSON。修改或删除已有记录时，仍按下方并行编辑方法使用 `apply`。
+
 ## 普通批注
 
 ```json

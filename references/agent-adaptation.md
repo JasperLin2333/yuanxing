@@ -29,14 +29,24 @@ node "<Skill目录>/scripts/yuanxing.mjs" workspace add --workspace "<工作区.
 ## 按影响验证
 
 - 原型文案、样式和需求正文：核对本轮含义、受影响语法与引用，不运行通用测试库，不为简单页面补测试。
-- 修改工具实现：按行为选已有测试，例如定位用 `test/locate.test.mjs`，文档查看用 `test/document-player.test.mjs`，离线导出用 `test/export-data.test.mjs` 与 `test/compatibility.test.mjs`；查到关联影响再增加。测试文件在通用源码仓库中，不随安装包分发。
-- 保存合并、共享数据协议或分发调整、关联失败无法定位，以及发布版本前，再扩大回归。修改的文件数不决定测试范围；已通过且未再变化的检查不重跑。
+- 修改元形源码（CLI、运行时、数据协议、分发）：在源码仓库运行 `npm test`，全套约 2 秒，不必再挑选子集；新增行为补对应用例。调试单个问题时可先跑相关文件，例如 `node --test --test-reporter=dot test/locate.test.mjs`，收口仍跑全套。测试文件不随安装包分发。
+- 已通过且未再变化的检查不重跑。
 - Node 测试加 `--test-reporter=dot`，成功仅简明输出，失败保留具体报错；源码仓库的 `npm test` 默认使用该输出。交付说明行为与实际证据，不逐条展示日志或把测试总数当作用户验收。
 - 只有影响现有分享内容或离线运行代码时才重建该入口。纯 Skill 文字、定位和 CLI 加载优化不自动重建原型或生成各渠道包。
 
 ## 分发与版本
 
 维护同一份通用 `SKILL.md`、`scripts/`、`runtime/` 和参考资料。`agents/openai.yaml` 仅提供支持它的宿主使用的展示元数据。市场需要的字段在发布时注入，不在主指令中堆叠每个平台的字段或维护多套运行时。
+
+本机安装与更新使用随包脚本，不直接覆盖已安装目录：
+
+```sh
+node scripts/install.mjs --target "<宿主Skills目录>/yuanxing"            # 首次安装，目标已存在时停止
+node scripts/install.mjs --target "<宿主Skills目录>/yuanxing" --check    # 只读：列出与源码打包结果及安装记录的差异
+node scripts/install.mjs --target "<宿主Skills目录>/yuanxing" --update   # 备份后整体替换
+```
+
+安装时在目标根目录写入 `.yuanxing-install.json`，记录版本与各文件摘要，只供更新判断，不进入发布包。`--update` 先在旁边组装新版本，再完整备份原目录并核对，最后整体替换；默认备份到 `~/.yuanxing-backups/`，可用 `--backup <目录>` 指定，不能放在安装目录内或 Skills 目录中被当作同名 Skill。检测到安装后的本地改动，或旧安装没有记录且内容与源码不同时，先输出差异并停止；核对后加 `--force` 才更新，仍会先备份。目标是符号链接时直接维护其源码。
 
 ```sh
 node scripts/pack.mjs --target generic

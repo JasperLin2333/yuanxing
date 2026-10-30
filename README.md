@@ -155,6 +155,13 @@ node scripts/yuanxing.mjs init ./my-prototype --name "我的产品"
 node scripts/install.mjs --target "/你的宿主/skills/yuanxing"
 ```
 
+之后更新到新版本：先用 `--check` 查看差异，再用 `--update` 备份原安装后替换；安装后改过的文件会先列出，确认后加 `--force` 才覆盖。
+
+```sh
+node scripts/install.mjs --target "/你的宿主/skills/yuanxing" --check
+node scripts/install.mjs --target "/你的宿主/skills/yuanxing" --update
+```
+
 导出当前项目：
 
 ```sh

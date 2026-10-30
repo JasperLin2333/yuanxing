@@ -16,6 +16,8 @@ node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项
 node scripts/yuanxing.mjs workspace list --workspace <工作区.json>
 node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] [--open]
 node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
+node scripts/yuanxing.mjs updates add --root <目录> --text <变更说明> [--date YYYY-MM-DD] [--node 页面标识] [--label 跳转名称] [--id 标识]
+node scripts/yuanxing.mjs updates list --root <目录> [--json]
 node scripts/yuanxing.mjs locate --root <目录> [--query 关键词或页面标识] [--module 模块标识] [--limit 6] [--json]
 node scripts/yuanxing.mjs check --root <目录>
 node scripts/yuanxing.mjs serve --root <目录> [--port 4318] [--open]
@@ -38,6 +40,11 @@ function required(flags,key){if(!flags[key])throw new Error(`请指定 --${key}`
 function identifier(value){if(!/^[a-zA-Z][\w-]*$/.test(value))throw new Error('标识只能包含字母、数字、下划线或连字符，并以字母开头');return value;}
 async function exists(target){try{await fs.lstat(target);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}}
 function sameOrInside(root,target){return target===root||target.startsWith(root+path.sep);}
+function today(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
+function calendarDate(value){
+  const valid=/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
+  if(!valid)throw new Error('日期应为有效的 YYYY-MM-DD');return value;
+}
 
 export async function run(args,{sessionToken}={}){
   const [command,...rest]=args;
@@ -121,6 +128,24 @@ export async function run(args,{sessionToken}={}){
     catch(error){if(error.details)console.error(JSON.stringify({base,local:next,...error.details},null,2));throw error;}return;
   }
   const {model,revision}=await store.readModel(),base=JSON.parse(JSON.stringify(model));
+  if(command==='updates'){
+    const action=flags._[0];
+    if(action==='list'){
+      const updates=[...(model.updates||[])].sort((a,b)=>b.date.localeCompare(a.date));
+      if(flags.json)console.log(JSON.stringify(updates,null,2));
+      else console.log(updates.length?updates.map(item=>`${item.date}  ${item.text}${item.node?`  → ${item.label||model.nodes.find(n=>n.id===item.node)?.title||item.node}`:''}  (${item.id})`).join('\n'):'暂无更新说明');
+      return updates;
+    }
+    if(action!=='add')throw new Error('更新说明操作应为 add 或 list');
+    const text=required(flags,'text').trim(),date=calendarDate(flags.date||today());if(!text)throw new Error('更新说明不能为空');
+    const id=identifier(flags.id||`update-${date}-${randomBytes(3).toString('hex')}`);
+    if((model.updates||[]).some(item=>item.id===id))throw new Error('更新说明标识已存在');
+    if(flags.node&&!model.nodes.some(n=>n.id===flags.node))throw new Error('关联页面不存在：'+flags.node);
+    // 最新记录放在最前；并行新增由共同基线逐项合并。
+    model.updates=[{id,date,text,...(flags.node?{node:flags.node}:{}),...(flags.label?{label:flags.label}:{})},...(model.updates||[])];
+    const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));
+    await store.save(model,revision,base);console.log(`已添加更新说明 ${id}`);return model.updates[0];
+  }
   if(command==='add'){
     const source=await fs.realpath(path.resolve(required(flags,'source'))),extension=path.extname(source).toLowerCase();
     const kind=['.html','.htm'].includes(extension)?'html':['.png','.jpg','.jpeg','.webp'].includes(extension)?'image':null;
