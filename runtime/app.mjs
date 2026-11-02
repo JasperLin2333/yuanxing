@@ -35,6 +35,7 @@ function observePreviews(nodes){
 }
 let devMode=false,devPicker=null,devElement=null,devSnapshot=null,devOriginal=null;
 let annotationEditor=null,annotationEditorId=null,annotationEditorNew=false;
+let connectionLabelEditor=null,pendingModelRender=false;
 let linesHidden=false,viewReady=false,viewTimer;
 let zoomSensitivity=3.5;try{const saved=Number(localStorage.getItem('yuanxing-zoom-sensitivity'));if(saved>=.5&&saved<=6)zoomSensitivity=Math.round(saved*10)/10;}catch{}
 let camera={x:30,y:30,scale:0.8},pageScale=1,noteFit=true,cameras={},positions={},frames={},missing=new Set(),inputGroup=null;
@@ -119,11 +120,17 @@ function notice(text,actions=[],kind='info'){
   if(kind!=='save')noticeTimer=setTimeout(closeNotice,5000);
 }
 function updateHistoryButtons(){document.querySelector('[data-action="undo"]').disabled=!history.past.length;}
-function edit(fn,render=true,group=null){if(readonly)return;history.push(model,{group});fn(model);dirty=true;updateHistoryButtons();scheduleSave();if(render)renderAll();}
+function edit(fn,render=true,group=null,{background=false}={}){if(readonly&&(!background||originalReadonly))return;history.push(model,{group});fn(model);dirty=true;updateHistoryButtons();scheduleSave();if(render)renderAll();}
 function editField(fn){if(readonly)return;if(inputGroup!==document.activeElement){history.push(model);inputGroup=document.activeElement;}fn(model);dirty=true;updateHistoryButtons();scheduleSave();}
+function editInspectedValue(read,write,path,value,previous){
+  const current=read(model);
+  if(current===undefined){conflict=true;notice('当前内容已被删除，输入尚未保存。',[['导出我的输入',()=>download(value,'未保存的输入.txt','text/plain')],['放弃输入',()=>{conflict=false;renderAll();if(dirty)scheduleSave();}]],'save');return;}
+  if(!conflict&&current!==previous&&current!==value){const remote=clone(model),baseline=clone(model),persisted=clone(baseModel);write(baseline,previous);history.push(model);write(model,value);dirty=true;updateHistoryButtons();showCollaborationConflict({model:remote,revision,conflicts:[path],persisted,field:{read,write}},model,baseline);return;}
+  editField(m=>write(m,value));
+}
 function scheduleSave(){clearTimeout(timer);timer=setTimeout(save,600);}
 function showCollaborationConflict(data,snapshot,baseline){
-  conflict=true;conflictData={base:clone(baseline),local:clone(snapshot),remote:clone(data.model),revision:data.revision,conflicts:data.conflicts};
+  conflict=true;conflictData={base:clone(baseline),local:clone(snapshot),remote:clone(data.model),revision:data.revision,conflicts:data.conflicts,...(data.persisted?{persisted:clone(data.persisted)}:{}),...(data.field?{field:data.field}:{})};
   const backup=()=>download(JSON.stringify({...conflictData,local:model},null,2),'工作台双方修改.json','application/json');
   notice('同一内容被同时修改：'+data.conflicts.slice(0,3).join('、')+'。请选择冲突内容，其他独立修改会一起保留。',[
     ['保留我的冲突项',()=>resolveCollaborationConflict('local')],['采用外部冲突项',()=>resolveCollaborationConflict('remote')],['导出双方修改',backup]
@@ -131,8 +138,9 @@ function showCollaborationConflict(data,snapshot,baseline){
 }
 function resolveCollaborationConflict(prefer){
   if(!conflictData)return;const data=conflictData,chosen=mergeProject(data.base,model,data.remote,{prefer});
+  if(data.field)data.field.write(chosen.model,data.field.read(prefer==='local'?model:data.remote));
   const errors=validate(chosen.model);if(errors.length){notice('合并后存在关联冲突：'+errors.join('；'),[['导出双方修改',()=>download(JSON.stringify({...data,local:model},null,2),'工作台双方修改.json','application/json')]],'save');return;}
-  history.push(model);model=chosen.model;baseModel=clone(data.remote);revision=data.revision;conflict=false;conflictData=null;dirty=true;renderAll();scheduleSave();
+  history.push(model);model=chosen.model;baseModel=clone(data.persisted||data.remote);revision=data.revision;conflict=false;conflictData=null;dirty=true;renderAll();scheduleSave();
 }
 async function save(){
   if(saveFlight)return saveFlight;
@@ -140,14 +148,15 @@ async function save(){
   const errors=validate(model);if(errors.length){updateHistoryButtons();notice(errors.join('；'),[],'save');return;}
   saving=true;const snapshot=clone(model),baseline=clone(baseModel);saveFlight=(async()=>{
   try{const r=await fetch(apiBase+'/api/project',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({revision,model:snapshot,baseModel:baseline})});const data=await r.json();
+    while(connectionLabelEditor)await connectionLabelEditor.done;
     if(r.status===409&&data.model&&data.conflicts){showCollaborationConflict(data,snapshot,baseline);return;}
     if(r.status===409){conflict=true;throw new Error('项目已被外部修改，当前编辑内容仍保留。');}if(!r.ok)throw new Error(data.error||'保存失败');
     const saved=data.model||snapshot,combined=mergeProject(snapshot,model,saved);revision=data.revision;baseModel=clone(saved);
     if(combined.conflicts.length){showCollaborationConflict({model:saved,revision,conflicts:combined.conflicts},model,snapshot);return;}
-    const changed=JSON.stringify(model)!==JSON.stringify(combined.model);model=combined.model;dirty=JSON.stringify(model)!==JSON.stringify(saved);updateHistoryButtons();if(changed){history.clear();renderAll();}if($('#message').dataset.kind==='save')$('#message').hidden=true;if(dirty)scheduleSave();
+    const changed=JSON.stringify(model)!==JSON.stringify(combined.model);if(changed)history.rebase(snapshot,saved);model=combined.model;dirty=JSON.stringify(model)!==JSON.stringify(saved);updateHistoryButtons();if(changed)pendingModelRender=true;if($('#message').dataset.kind==='save')$('#message').hidden=true;if(dirty)scheduleSave();
   }
   catch(error){updateHistoryButtons();const backup=['导出我的修改',()=>download(JSON.stringify(model,null,2),'工作台未保存修改.json','application/json')];notice(error.message,conflict?[backup,['重新载入',()=>{if(confirm('重新载入会替换当前编辑内容。请先导出需要保留的修改。'))reload();}]]:[['重试',save],backup],'save');}
-  finally{saving=false;saveFlight=null;}
+  finally{saving=false;saveFlight=null;flushModelRender();}
   })();return saveFlight;
 }
 async function reload(render=true){const r=await fetch(apiBase+'/api/project');if(!r.ok)throw new Error(await r.text());bundle=await r.json();model=bundle.model;baseModel=clone(model);flowContext=clone(model.contextDefaults||{});revision=bundle.revision;dirty=conflict=false;conflictData=null;history.clear();updateHistoryButtons();$('#message').hidden=true;moduleId=model.modules.some(m=>m.id===moduleId)?moduleId:model.entryModule||model.modules[0]?.id;if(render)renderAll();}
@@ -155,13 +164,14 @@ async function saveDocumentText(change){
   if(originalReadonly)throw new Error('请在本地工作台修改需求正文。');
   if(saveFlight)await saveFlight;await save();if(dirty||conflict)throw new Error('工作台修改尚未保存，请先处理保存提示。');
   const baseline=clone(model),response=await fetch(apiBase+'/api/document/source',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(change)}),data=await response.json();
+  while(connectionLabelEditor)await connectionLabelEditor.done;
   if(!response.ok)throw new Error(data.error||'文字未保存');
   Object.assign(bundle.documentSources,data.documentSources);Object.assign(bundle.documentSourceVersions,data.documentSourceVersions);
   for(const [before,after] of Object.entries(data.keyChanges))if(before!==after){delete bundle.documentSources[before];delete bundle.documentSourceVersions[before];}
-  const combined=mergeProject(baseline,model,data.model);baseModel=clone(data.model);revision=data.revision;
+  const combined=mergeProject(baseline,model,data.model),changed=JSON.stringify(model)!==JSON.stringify(combined.model);baseModel=clone(data.model);revision=data.revision;
   if(combined.conflicts.length)showCollaborationConflict({model:data.model,revision,conflicts:combined.conflicts},model,baseline);
-  else{if(JSON.stringify(baseline)!==JSON.stringify(data.model))history.clear();model=combined.model;bundle.model=model;dirty=JSON.stringify(model)!==JSON.stringify(baseModel);if(dirty)scheduleSave();}
-  updateHistoryButtons();if(!conflict&&$('#message').dataset.kind==='save')$('#message').hidden=true;return data;
+  else{if(JSON.stringify(baseline)!==JSON.stringify(data.model))history.rebase(baseline,data.model);model=combined.model;bundle.model=model;dirty=JSON.stringify(model)!==JSON.stringify(baseModel);if(changed)pendingModelRender=true;if(dirty)scheduleSave();}
+  updateHistoryButtons();if(!conflict&&$('#message').dataset.kind==='save')$('#message').hidden=true;flushModelRender();return data;
 }
 function sidebar(){
   $('#project-title').textContent=model.title;$('#module-title').textContent=recycleOpen?'回收站':model.modules.find(m=>m.id===moduleId)?.title||'';
@@ -204,12 +214,24 @@ function openAnnotationEditor(id,{isNew=false}={}){
 }
 const contextIcons={left:'M4 4v16M8 7h12M8 17h8',centerX:'M12 3v18M4 7h16M7 17h10',right:'M20 4v16M4 7h12M8 17h8',top:'M4 4h16M7 8v12M17 8v8',centerY:'M3 12h18M7 4v16M17 7v10',bottom:'M4 20h16M7 4v12M17 8v8',spaceX:'M3 4v16M21 4v16M9 7v10M15 7v10M3 12h18',spaceY:'M4 3h16M4 21h16M7 9h10M7 15h10M12 3v18',focus:'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5',open:'M14 3h7v7M21 3 10 14M21 14v7H3V3h7'};
 function contextButton(icon,label,fn){const button=document.createElement('button');button.className='tool-icon';button.title=label;button.setAttribute('aria-label',label);button.innerHTML=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${contextIcons[icon]||contextIcons.focus}"/></svg>`;button.onclick=fn;return button;}
-function copySelection(){const ids=selectedNodeIds();if(!ids.length||readonly)return null;flowClipboard=copyCanvasSelection(model,moduleId,ids,{recycle:recycleOpen});Object.assign(flowClipboard,canvasClipboardAssets(flowClipboard,bundle));pasteCount=0;return flowClipboard;}
+function copySelection(){const ids=selectedNodeIds();if(!ids.length||readonly)return null;flowClipboard=copyCanvasSelection(model,moduleId,ids,{recycle:recycleOpen});Object.assign(flowClipboard,canvasClipboardAssets(flowClipboard,bundle),{projectKey:boot.projectKey||bundle?.projectKey,sourceExtension:!!projectExtension});pasteCount=0;return flowClipboard;}
 function writeCanvasClipboard(event,clipboard){
   if(!event.clipboardData||!clipboard?.nodes?.length)return false;
   try{event.clipboardData.setData('text/plain','YUANXING_SELECTION\n'+JSON.stringify(clipboard));event.preventDefault();return true;}catch{notice('未能写入剪贴板，请重试。');return false;}
 }
-function pasteSelection(clipboard=flowClipboard,point=null){if(readonly||!clipboard?.nodes?.length)return;const errors=validate({version:1,title:'复制内容',modules:[{id:'clipboard',title:'复制内容'}],nodes:clipboard.nodes.map(n=>{const value={...n,module:'clipboard'};delete value.section;return value;}),edges:clipboard.edges||[],annotations:clipboard.annotations||[],rules:clipboard.rules||{}});if(errors.length){notice('无法粘贴流程：'+errors.join('；'));return;}pasteCount++;let target=point||defaultInsertPoint();const size=[Math.max(...clipboard.nodes.map(n=>n.x+canvasNodeWidth(n))),Math.max(...clipboard.nodes.map(n=>n.y+canvasNodeHeight(n)))],existing=activeCanvasNodes();target=[target[0]+(pasteCount-1)*24,target[1]+(pasteCount-1)*24];if(existing.some(n=>target[0]<n.x+canvasNodeWidth(n)+24&&target[0]+size[0]+24>n.x&&target[1]<n.y+canvasNodeHeight(n)+24&&target[1]+size[1]+24>n.y))target=[target[0],Math.max(...existing.map(n=>n.y+canvasNodeHeight(n)+64))];edit(m=>{const ids=pasteCanvasSelection(m,moduleId,clipboard,target,{recycle:recycleOpen});ids.forEach((id,i)=>{const source=clipboard.nodes[i];if(source&&clipboard.resources?.[source.id])bundle.resources[id]=clipboard.resources[source.id];});Object.assign(bundle.images,clipboard.images||{});Object.assign(bundle.fragments,clipboard.fragments||{});const visible=ids.filter(id=>recycleOpen||m.nodes.find(n=>n.id===id)?.overview!==false);selected=visible.length>1?{type:'nodes',ids:visible}:visible.length?{type:'node',id:visible[0]}:null;current=null;});fitSelection();}
+function importClipboardSelection(clipboard,point,target){
+  const job=(async()=>{try{const response=await fetch(apiBase+'/api/clipboard/import',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(clipboard)}),data=await response.json();if(!response.ok)throw new Error(data.error||'资源导入失败');pasteSelection(data,point,target);}
+  catch(error){notice('无法跨项目粘贴：'+error.message+' 如果之前使用了剪切，请回到来源项目粘贴找回所选内容并核对连线。',[],'save');}})();pendingImages.add(job);job.finally(()=>pendingImages.delete(job));return job;
+}
+function pasteSelection(clipboard=flowClipboard,point=null,target={module:moduleId,bin:recycleOpen}){
+  if(originalReadonly||!clipboard?.nodes?.length)return;if(!model.modules.some(m=>m.id===target.module)){notice('目标模块已删除，无法粘贴。');return;}
+  const errors=validate({version:1,title:'复制内容',modules:[{id:'clipboard',title:'复制内容'}],nodes:clipboard.nodes.map(n=>{const value={...n,module:'clipboard'};delete value.section;return value;}),edges:clipboard.edges||[],annotations:clipboard.annotations||[],rules:clipboard.rules||{}});if(errors.length){notice('无法粘贴流程：'+errors.join('；'));return;}
+  if(!clipboard.projectKey||clipboard.projectKey!==(boot.projectKey||bundle?.projectKey))return importClipboardSelection(clipboard,point||defaultInsertPoint(),target);
+  pasteCount++;let position=point||defaultInsertPoint();const size=[Math.max(...clipboard.nodes.map(n=>n.x+canvasNodeWidth(n))),Math.max(...clipboard.nodes.map(n=>n.y+canvasNodeHeight(n)))],existing=target.bin?recycleCanvasNodes(model):moduleNodes(model,target.module),active=!readonly&&!documentMode&&!current&&moduleId===target.module&&recycleOpen===target.bin;
+  position=[position[0]+(pasteCount-1)*24,position[1]+(pasteCount-1)*24];if(existing.some(n=>position[0]<n.x+canvasNodeWidth(n)+24&&position[0]+size[0]+24>n.x&&position[1]<n.y+canvasNodeHeight(n)+24&&position[1]+size[1]+24>n.y))position=[position[0],Math.max(...existing.map(n=>n.y+canvasNodeHeight(n)+64))];
+  edit(m=>{const ids=pasteCanvasSelection(m,target.module,clipboard,position,{recycle:target.bin});ids.forEach((id,i)=>{const source=clipboard.nodes[i];if(source&&clipboard.resources?.[source.id])bundle.resources[id]=clipboard.resources[source.id];});Object.assign(bundle.images,clipboard.images||{});Object.assign(bundle.fragments,clipboard.fragments||{});if(active){const visible=ids.filter(id=>target.bin||m.nodes.find(n=>n.id===id)?.overview!==false);selected=visible.length>1?{type:'nodes',ids:visible}:visible.length?{type:'node',id:visible[0]}:null;current=null;}},active,null,{background:true});
+  if(active)fitSelection();else{pendingModelRender=true;notice('内容已粘贴到原目标模块。');}
+}
 function duplicateSelection(){const ns=activeCanvasNodes().filter(n=>selectedNodeIds().includes(n.id));if(!ns.length)return;const copy=copySelection();pasteSelection(copy,[Math.max(...ns.map(n=>n.x+canvasNodeWidth(n)))+64,Math.min(...ns.map(n=>n.y))]);}
 function selectionControls(pane){
   const ids=selectedNodeIds();if(readonly||!ids.length||current||recycleOpen)return;
@@ -291,7 +313,7 @@ function paintLines(){
     svg.innerHTML='<defs>'+[['arrow','var(--wire-color)'],['arrow-active','var(--green)']].map(([id,color])=>`<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="${8/camera.scale}" markerHeight="${8/camera.scale}" markerUnits="userSpaceOnUse" orient="auto"><path d="M1 1L9 5L1 9Z" fill="${color}"/></marker>`).join('')+'</defs>';
     const layers=Array.from({length:3},()=>document.createElementNS('http://www.w3.org/2000/svg','g'));svg.append(...layers);svg.yuanxingLayers={paths:layers[0],labels:layers[1],controls:layers[2],views:new Map()};
   }
-  const {paths:pathsLayer,labels:labelLayer,controls:controlsLayer,views}=svg.yuanxingLayers,kept=new Set();labelLayer.replaceChildren();controlsLayer.replaceChildren();
+  const {paths:pathsLayer,labels:labelLayer,controls:controlsLayer,views}=svg.yuanxingLayers,kept=new Set();controlsLayer.replaceChildren();
   const grouped=new Map();for(const e of edges){const key=connectionKey(e);if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(e);}
   const routes=new Map(routeConnections(ns,[...grouped.values()].map(edges=>edges[0]),{scope:moduleId}).map(line=>[connectionKey(line.edge),line]));
   const textContext=lineTextContext??=document.createElement('canvas').getContext('2d');textContext.font=`12px ${getComputedStyle(svg).fontFamily}`;
@@ -307,11 +329,13 @@ function paintLines(){
     path.onpointerenter=hit.onpointerenter=()=>{path.classList.add('hovered');if(!isBranch(to))path.setAttribute('marker-end','url(#arrow-active)');};path.onpointerleave=hit.onpointerleave=()=>{path.classList.remove('hovered');if(!isBranch(to))path.setAttribute('marker-end',`url(#${active?'arrow-active':'arrow'})`);};
     path.ondblclick=hit.ondblclick=event=>editConnectionLabel(e.id,event);hit.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();select();editConnectionLabel(e.id,event);}};
     const placement=labels.get(line.edge.id);
-    if(placement){const {box,rows,leader}=placement,group=document.createElementNS('http://www.w3.org/2000/svg','g');group.classList.add('edge-label');group.dataset.edge=e.id;group.onclick=select;group.ondblclick=event=>editConnectionLabel(e.id,event);if(!readonly)group.onpointerdown=event=>dragEdgeLabel(event,e.id,box);
-      if(leader){const pointer=document.createElementNS('http://www.w3.org/2000/svg','path');pointer.classList.add('label-leader');pointer.setAttribute('d',leader);labelLayer.append(pointer);}
-      const background=document.createElementNS('http://www.w3.org/2000/svg','rect');for(const key of ['x','y','width','height'])background.setAttribute(key,box[key]);group.append(background);
-      const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.classList.add('label');label.dataset.edge=e.id;rows.forEach((text,i)=>{const row=document.createElementNS('http://www.w3.org/2000/svg','tspan');row.setAttribute('x',box.x+6);row.setAttribute('y',box.y+16+i*18);row.textContent=text;label.append(row);});group.append(label);labelLayer.append(group);
-    }
+    if(placement){const {box,rows,leader}=placement;
+      if(!view.labelGroup){const group=document.createElementNS('http://www.w3.org/2000/svg','g'),background=document.createElementNS('http://www.w3.org/2000/svg','rect'),label=document.createElementNS('http://www.w3.org/2000/svg','text');group.classList.add('edge-label');label.classList.add('label');group.append(background,label);labelLayer.append(group);Object.assign(view,{labelGroup:group,background,label});}
+      const {labelGroup:group,background,label}=view;group.dataset.edge=e.id;group.onclick=select;group.ondblclick=event=>editConnectionLabel(e.id,event);if(!readonly)group.onpointerdown=event=>dragEdgeLabel(event,e.id,box);
+      if(leader){if(!view.leader){view.leader=document.createElementNS('http://www.w3.org/2000/svg','path');view.leader.classList.add('label-leader');labelLayer.append(view.leader);}view.leader.setAttribute('d',leader);}else if(view.leader){view.leader.remove();view.leader=null;}
+      for(const key of ['x','y','width','height'])background.setAttribute(key,box[key]);label.dataset.edge=e.id;
+      const previous=[...label.childNodes];rows.forEach((text,i)=>{const row=previous[i]||document.createElementNS('http://www.w3.org/2000/svg','tspan');row.setAttribute('x',box.x+6);row.setAttribute('y',box.y+16+i*18);if(row.textContent!==text)row.textContent=text;if(!previous[i])label.append(row);});for(const row of previous.slice(rows.length))row.remove();
+    }else if(view.labelGroup){view.labelGroup.remove();view.labelGroup=null;view.leader?.remove();view.leader=null;}
     if(!readonly&&selected?.type==='edge'&&selected.id===e.id){
       const geometry=document.createElementNS('http://www.w3.org/2000/svg','g');geometry.classList.add('edge-geometry-controls');
       for(let i=0;i<route.points.length-1;i++){
@@ -338,7 +362,7 @@ function paintLines(){
       }
     }
   }
-  for(const [key,view] of views)if(!kept.has(key)){view.path.remove();view.hit.remove();views.delete(key);}lastLinesSignature=signature;
+  for(const [key,view] of views)if(!kept.has(key)){view.path.remove();view.hit.remove();view.labelGroup?.remove();view.leader?.remove();views.delete(key);}lastLinesSignature=signature;
 }
 function edgeGeometryGesture(event,id,update){
   if(readonly||event.button!==0||spacePressed)return;event.preventDefault();event.stopPropagation();activeCanvasGesture?.();
@@ -412,11 +436,14 @@ function dragConnection(event,fixed,fixedSide,edge=null,endpoint='to',fork=null)
 }
 function editConnectionLabel(id,event){
   if(readonly)return;event.preventDefault();event.stopPropagation();const edge=model.edges.find(e=>e.id===id);if(!edge)return;
-  document.querySelector('#edge-label-editor')?.blur();const branch=node(edge.to),target=isBranch(branch)?branch:edge,input=document.createElement('input'),rect=event.currentTarget?.getBoundingClientRect();
+  document.querySelector('#edge-label-editor')?.blur();const branch=node(edge.to),input=document.createElement('input'),rect=event.currentTarget?.getBoundingClientRect();
   input.id='edge-label-editor';input.setAttribute('aria-label','连线名称');input.value=isBranch(branch)?branch.title:edge.condition||(['继续'].includes(edge.label)?'':edge.label||'');
   Object.assign(input.style,{left:Math.max(8,Math.min(innerWidth-248,Number.isFinite(event.clientX)?event.clientX:rect?.left||8))+'px',top:Math.max(8,Math.min(innerHeight-48,Number.isFinite(event.clientY)?event.clientY:rect?.top||8))+'px'});
-  let closed=false;const close=save=>{if(closed)return;closed=true;const value=input.value.trim();input.remove();if(save&&value!==(isBranch(branch)?branch.title:edge.condition||(['继续'].includes(edge.label)?'':edge.label||'')))edit(()=>{if(isBranch(target))target.title=value;else{target.label=value;if(target.condition!==undefined)target.condition=value;}});};
-  input.onblur=()=>close(true);input.onpointerdown=e=>e.stopPropagation();input.onkeydown=e=>{e.stopPropagation();if(e.key==='Escape'||e.key==='Enter'){e.preventDefault();close(e.key==='Enter');$('#canvas-viewport').focus({preventScroll:true});}};document.body.append(input);input.focus();input.select();
+  let closed=false,finish;const initial=input.value,done=new Promise(resolve=>finish=resolve);connectionLabelEditor={input,initial,done};
+  const close=save=>{if(closed)return;closed=true;const value=input.value.trim(),current=model.edges.find(e=>e.id===id),target=current&&node(current.to),old=isBranch(target)?target.title:current?.condition||(['继续'].includes(current?.label)?'':current?.label||'');input.remove();connectionLabelEditor=null;
+    try{if(save&&current&&value!==old)edit(m=>{const owner=m.edges.find(e=>e.id===id),destination=owner&&m.nodes.find(n=>n.id===owner.to);if(isBranch(destination))destination.title=value;else if(owner){owner.label=value;if(owner.condition!==undefined)owner.condition=value;}});}finally{finish();}
+  };
+  input.onblur=()=>close(true);input.onpointerdown=e=>e.stopPropagation();input.onkeydown=e=>{e.stopPropagation();if(e.isComposing||e.keyCode===229)return;if(e.key==='Escape'||e.key==='Enter'){e.preventDefault();close(e.key==='Enter');$('#canvas-viewport').focus({preventScroll:true});}};document.body.append(input);input.focus();input.select();
 }
 function drawAlignmentGuides(guides=[]){
   const host=$('#alignment-guides');host.replaceChildren();
@@ -591,7 +618,7 @@ function capturePoint(event){
   const move=e=>{const p=[Math.min(1,Math.max(0,(e.clientX-r.x)/r.width)),Math.min(1,Math.max(0,(e.clientY-r.y)/r.height))];box.style.cssText=`left:${Math.min(start[0],p[0])*100}%;top:${Math.min(start[1],p[1])*100}%;width:${Math.abs(p[0]-start[0])*100}%;height:${Math.abs(p[1]-start[1])*100}%`;};
   const end=e=>{cover.removeEventListener('pointermove',move);cover.removeEventListener('pointerup',end);box.remove();const p=[Math.min(1,Math.max(0,(e.clientX-r.x)/r.width)),Math.min(1,Math.max(0,(e.clientY-r.y)/r.height))],rect=[Math.min(start[0],p[0]),Math.min(start[1],p[1]),Math.abs(p[0]-start[0]),Math.abs(p[1]-start[1])];mode=null;renderOverlays();if(rect[2]<.005||rect[3]<.005){notice('请拖出按钮或交互区域。');return;}const id=linkCaptureTarget,n=node(current),anchor={rect};linkCaptureTarget=null;if(!model.edges.some(v=>v.id===id))return;if(n.kind==='image')anchor.imagePath=n.path;edit(m=>{const owner=m.edges.find(v=>v.id===id);delete owner.selector;delete owner.imagePath;delete owner.trigger;Object.assign(owner,anchor);selected={type:'edge',id};},false);if(n.kind==='html'&&frames[current])measure(frames[current],n);renderOverlays();renderInspector();};cover.addEventListener('pointermove',move);cover.addEventListener('pointerup',end);
 }
-function field(label,value,oninput,area=false){const box=document.createElement('label');box.textContent=label;const input=document.createElement(area?'textarea':'input');input.value=value||'';if(area)input.rows=6;input.oninput=()=>oninput(input.value);input.onblur=()=>inputGroup=null;box.append(input);return box;}
+function field(label,value,oninput,area=false,onpaste=null){const box=document.createElement('label');box.textContent=label;const input=document.createElement(area?'textarea':'input');input.value=value||'';let previous=input.value;input.yuanxingSetValue=value=>{input.value=value;previous=value;};if(area)input.rows=6;input.oninput=()=>{const before=previous;previous=input.value;oninput(input.value,before);};input.onblur=()=>inputGroup=null;if(onpaste)input.onpaste=event=>onpaste(event,input);box.append(input);return box;}
 function explanationText(owner){return requirementText(model,owner);}
 function canvasText(owner){return canvasExplanation(model,owner);}
 function writeExplanation(owner,text){owner.description=text;delete owner.rule;}
@@ -599,36 +626,38 @@ function updateNote(n){if(n.kind!=='note')return;const thumb=document.querySelec
 function descriptionField(n){
   const box=document.createElement('div');box.className='description-field';
   const label=document.createElement('span');label.className='field-label';label.textContent=n.kind==='note'?'说明正文':'核心说明';box.append(label);
-  const editor=document.createElement('div');editor.className='rich-editor markdown';editor.contentEditable='true';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','页面说明');editor.setAttribute('aria-multiline','true');editor.dataset.placeholder='输入说明';editor.innerHTML=richText(canvasText(n));
-  editor.oninput=()=>{const target=node(n.id);if(!target)return;editField(()=>writeCanvasExplanation(target,readDescription(editor)));updateNote(target);};
-  editor.onblur=()=>{inputGroup=null;if(!editor.dataset.uploading){const target=node(n.id);editor.innerHTML=target?richText(canvasText(target)):'';}};
+  const editor=document.createElement('div');editor.className='rich-editor markdown';editor.contentEditable='true';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','页面说明');editor.setAttribute('aria-multiline','true');editor.dataset.placeholder='输入说明';editor.yuanxingText=canvasText(n);editor.innerHTML=richText(editor.yuanxingText);
+  const read=model=>{const owner=model.nodes.find(item=>item.id===n.id);return owner?canvasExplanation(model,owner):undefined;},write=(model,value)=>{const owner=model.nodes.find(item=>item.id===n.id);if(owner)writeCanvasExplanation(owner,value);};
+  editor.oninput=()=>{const text=readDescription(editor),before=editor.yuanxingText;editor.yuanxingText=text;editInspectedValue(read,write,`nodes/${n.id}/${n.kind==='note'?'description':'summary'}`,text,before);const target=node(n.id);if(target)updateNote(target);};
+  editor.onblur=()=>{inputGroup=null;if(!editor.dataset.uploading){const target=node(n.id);editor.yuanxingText=target?canvasText(target):'';editor.innerHTML=richText(editor.yuanxingText);}};
   editor.onpaste=event=>{event.preventDefault();event.stopPropagation();if(editor.dataset.uploading)return;const images=clipboardImages(event);if(images.length){pasteDescriptionImages(images,n.id,editor);return;}const range=editorRange(editor);range.deleteContents();const text=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(text);range.setStartAfter(text);range.collapse(true);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);editor.oninput();};
   box.append(editor);return box;
 }
 function editorRange(editor){const selection=getSelection();if(selection.rangeCount&&editor.contains(selection.getRangeAt(0).commonAncestorContainer))return selection.getRangeAt(0).cloneRange();const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);return range;}
 function nodeTypeField(n){
-  const field=document.createElement('div'),label=document.createElement('span');field.className='select-field';label.className='field-label';label.textContent='节点类型';const select=createSelect({label:'节点类型',variant:'yx-select-field',options:[{value:'pc',label:'PC'},{value:'mobile',label:'移动端'}],value:canvasNodeType(n),onChange:value=>edit(m=>{m.nodes.find(v=>v.id===n.id).canvasType=value;})});field.append(label,select.element);return field;
+  const field=document.createElement('div'),label=document.createElement('span');field.className='select-field';label.className='field-label';label.textContent='节点类型';const select=createSelect({label:'节点类型',variant:'yx-select-field',options:[{value:'pc',label:'PC'},{value:'mobile',label:'移动端'}],value:canvasNodeType(n),onChange:value=>edit(m=>{const owner=m.nodes.find(v=>v.id===n.id);if(owner)owner.canvasType=value;})});field.append(label,select.element);return field;
 }
 function renderInspector(){
   selectionTools();const pane=$('#inspector');pane.replaceChildren();const heading=document.createElement('header');heading.className='inspector-header';const h=document.createElement('h2');h.textContent=selected?.type==='edge'?'连线说明':'页面说明';heading.append(h);pane.append(heading);
   if(selected?.type==='nodes'){h.textContent=`已选 ${selected.ids.length} 个节点`;selectionControls(pane);if(!readonly)heading.append(nodeDeleteButton());return;}
   if(!selected&&recycleOpen){h.textContent='回收站';pane.insertAdjacentHTML('beforeend','<p class="hint">选中内容后可复制或剪切，再到模块画布粘贴。</p>');return;}
-  if(!selected){h.textContent='模块设置';const m=model.modules.find(m=>m.id===moduleId);if(m&&!readonly)pane.append(field('模块名称',m.title,value=>{editField(()=>m.title=value);sidebar();}));return;}
+  if(!selected){h.textContent='模块设置';const m=model.modules.find(m=>m.id===moduleId);if(m&&!readonly){const read=model=>{const owner=model.modules.find(item=>item.id===m.id);return owner?owner.title||'':undefined;},write=(model,value)=>{const owner=model.modules.find(item=>item.id===m.id);if(owner)owner.title=value;};pane.append(field('模块名称',m.title,(value,previous)=>{editInspectedValue(read,write,`modules/${m.id}/title`,value,previous);sidebar();}));}return;}
   const annotation=selected.type==='annotation'?model.annotations.find(a=>a.id===selected.id):null;
   const edgeId=selected.type==='edge'?selected.id:annotation?.edge;
   if(edgeId){
     const e=model.edges.find(e=>e.id===edgeId);if(!e)return;h.textContent='连线说明';pane.insertAdjacentHTML('beforeend',`<p class="edge-summary">${esc(node(e.from)?.title)} <span aria-hidden="true">→</span> ${esc(node(e.to)?.title)}</p>`);
     if(readonly)pane.insertAdjacentHTML('beforeend',`<p>${esc(e.condition||e.label)}</p><div class="markdown">${richText(canvasText(e))}</div>`);
-    else{const branch=node(e.to);pane.append(field('操作名称',isBranch(branch)?branch.title:e.condition||e.label,value=>{editField(()=>{if(isBranch(branch))branch.title=value;else{e.label=value;if(e.condition!==undefined)e.condition=value;}});drawLines();}));pane.append(field('说明正文',canvasText(e),value=>editField(()=>writeCanvasExplanation(e,value)),true));
+    else{const branch=node(e.to),branchId=isBranch(branch)?branch.id:null,nameRead=model=>{if(branchId){const owner=model.nodes.find(item=>item.id===branchId);return owner?owner.title||'':undefined;}const owner=model.edges.find(item=>item.id===edgeId);return owner?owner.condition||owner.label||'':undefined;},nameWrite=(model,value)=>{if(branchId){const owner=model.nodes.find(item=>item.id===branchId);if(owner)owner.title=value;}else{const owner=model.edges.find(item=>item.id===edgeId);if(owner){owner.label=value;if(owner.condition!==undefined)owner.condition=value;}}},textRead=model=>{const owner=model.edges.find(item=>item.id===edgeId);return owner?canvasExplanation(model,owner):undefined;},textWrite=(model,value)=>{const owner=model.edges.find(item=>item.id===edgeId);if(owner)writeCanvasExplanation(owner,value);};
+      pane.append(field('操作名称',branchId?branch.title:e.condition||e.label,(value,previous)=>{editInspectedValue(nameRead,nameWrite,branchId?`nodes/${branchId}/title`:`edges/${edgeId}/label`,value,previous);drawLines();}));pane.append(field('说明正文',canvasText(e),(value,previous)=>editInspectedValue(textRead,textWrite,`edges/${edgeId}/summary`,value,previous),true,(event,input)=>pasteTextAreaImages(event,'edge',edgeId,input)));
 
 
-      if(projectExtension?.bindHotspots!==false&&!e.diagram&&!isBranch(node(e.from))){const bind=document.createElement('button');bind.textContent=e.selector||e.rect?'重新绑定点击区域':'绑定点击区域';bind.onclick=()=>{openNode(e.from);selected={type:'edge',id:e.id};linkCaptureTarget=e.id;mode='link';renderOverlays();renderInspector();};pane.append(bind);}
+      if(projectExtension?.bindHotspots!==false&&!e.diagram&&!isBranch(node(e.from))){const bind=document.createElement('button');bind.textContent=e.selector||e.rect?'重新绑定点击区域':'绑定点击区域';bind.onclick=()=>{const owner=model.edges.find(item=>item.id===edgeId);if(!owner)return;openNode(owner.from);selected={type:'edge',id:edgeId};linkCaptureTarget=edgeId;mode='link';renderOverlays();renderInspector();};pane.append(bind);}
       heading.append(deleteIconButton('删除连线及其标记',deleteSelectedConnection));
     }
     pointExplanations(pane,null,e.id);return;
   }
   const n=node(annotation?.node||selected.id);if(!n)return;
-  if(!readonly){if(selected.type==='node')selectionControls(pane);if(!isBranch(n))pane.append(nodeTypeField(n));pane.append(field(isBranch(n)?'分支名称':'页面名称',n.title,value=>{editField(()=>n.title=value);sidebar();const title=document.querySelector(`.node[data-id="${n.id}"] .node-header span`);if(title)title.textContent=value;if(current===n.id)$('#viewer-title').textContent=value;if(isBranch(n))drawLines();}));pane.append(isBranch(n)?field('说明正文',canvasText(n),value=>editField(()=>writeCanvasExplanation(n,value)),true):descriptionField(n));
+  if(!readonly){if(selected.type==='node')selectionControls(pane);if(!isBranch(n))pane.append(nodeTypeField(n));const nameRead=model=>{const owner=model.nodes.find(item=>item.id===n.id);return owner?owner.title||'':undefined;},nameWrite=(model,value)=>{const owner=model.nodes.find(item=>item.id===n.id);if(owner)owner.title=value;},textRead=model=>{const owner=model.nodes.find(item=>item.id===n.id);return owner?canvasExplanation(model,owner):undefined;},textWrite=(model,value)=>{const owner=model.nodes.find(item=>item.id===n.id);if(owner)writeCanvasExplanation(owner,value);};pane.append(field(isBranch(n)?'分支名称':'页面名称',n.title,(value,previous)=>{editInspectedValue(nameRead,nameWrite,`nodes/${n.id}/title`,value,previous);sidebar();const title=document.querySelector(`.node[data-id="${n.id}"] .node-header span`);if(title)title.textContent=value;if(current===n.id)$('#viewer-title').textContent=value;if(isBranch(n))drawLines();}));pane.append(isBranch(n)?field('说明正文',canvasText(n),(value,previous)=>editInspectedValue(textRead,textWrite,`nodes/${n.id}/description`,value,previous),true,(event,input)=>pasteTextAreaImages(event,'node',n.id,input)):descriptionField(n));
     heading.append(nodeDeleteButton([n.id]));
   }else pane.insertAdjacentHTML('beforeend',`<strong>${esc(n.title)}</strong><div class="markdown">${richText(canvasText(n))}</div>`);
   const lost=[...missing].filter(id=>outgoing(n.id).some(e=>e.id===id)||model.annotations.some(a=>a.node===n.id&&a.id===id));if(lost.length&&!readonly)pane.insertAdjacentHTML('beforeend','<p class="missing">页面已变化，部分标记暂未显示。</p>');
@@ -645,7 +674,7 @@ function pointExplanations(pane,nodeId,edgeId){
     if(!readonly)row.append(deleteIconButton(`删除标记 ${i+1}`,()=>deleteAnnotation(a.id)));section.append(row);
   });pane.append(section);
 }
-function renderAll(){updatesView.refresh();renderExperience();delete model.lockedPositions;if(annotationEditorId&&(!current||selected?.type!=='annotation'||selected.id!==annotationEditorId||!model.annotations.some(a=>a.id===annotationEditorId)))closeAnnotationEditor();closeMenus();cancelConnection?.();if(!model.modules.some(m=>m.id===moduleId)){moduleId=model.modules.some(m=>m.id===model.entryModule)?model.entryModule:model.modules[0]?.id;current=null;selected=null;if(!recycleOpen)camera=clone(cameras[moduleId]||{x:30,y:30,scale:.8});}if(current&&!node(current)){current=null;mode=null;}document.body.classList.toggle('readonly',readonly);document.body.classList.toggle('document-mode',documentMode);$('#document-view').hidden=!documentMode;if(documentMode){renderPanels();sidebar();$('#viewer').hidden=true;$('#canvas-viewport').hidden=true;$('#recycle-empty').hidden=true;$('#canvas-add-trigger').hidden=true;$('#canvas-add-divider').hidden=true;updateHistoryButtons();documentView.render();rememberView();return;}renderPanels();renderLineVisibility();sidebar();$('#viewer').hidden=!current;$('#canvas-viewport').hidden=!!current;$('#canvas-viewport').setAttribute('aria-label',recycleOpen?'回收站画布':'模块概览画布');$('#recycle-empty').hidden=!recycleOpen||!!current||!!recycleNodes(model).length;$('#canvas-add-trigger').hidden=!!current||recycleOpen;$('#canvas-add-divider').hidden=!!current||recycleOpen;$('#viewer-image-trigger').hidden=readonly||node(current)?.kind!=='image';document.querySelector('#viewer [data-action="overview"]').textContent=recycleOpen?'← 返回回收站':'← 返回概览';updateHistoryButtons();if(current)viewer();else canvas();renderInspector();rememberView();}
+function renderAll(){pendingModelRender=false;updatesView.refresh();renderExperience();delete model.lockedPositions;if(annotationEditorId&&(!current||selected?.type!=='annotation'||selected.id!==annotationEditorId||!model.annotations.some(a=>a.id===annotationEditorId)))closeAnnotationEditor();closeMenus();cancelConnection?.();if(!model.modules.some(m=>m.id===moduleId)){moduleId=model.modules.some(m=>m.id===model.entryModule)?model.entryModule:model.modules[0]?.id;current=null;selected=null;if(!recycleOpen)camera=clone(cameras[moduleId]||{x:30,y:30,scale:.8});}if(current&&!node(current)){current=null;mode=null;}document.body.classList.toggle('readonly',readonly);document.body.classList.toggle('document-mode',documentMode);$('#document-view').hidden=!documentMode;if(documentMode){renderPanels();sidebar();$('#viewer').hidden=true;$('#canvas-viewport').hidden=true;$('#recycle-empty').hidden=true;$('#canvas-add-trigger').hidden=true;$('#canvas-add-divider').hidden=true;updateHistoryButtons();documentView.render();rememberView();return;}renderPanels();renderLineVisibility();sidebar();$('#viewer').hidden=!current;$('#canvas-viewport').hidden=!!current;$('#canvas-viewport').setAttribute('aria-label',recycleOpen?'回收站画布':'模块概览画布');$('#recycle-empty').hidden=!recycleOpen||!!current||!!recycleNodes(model).length;$('#canvas-add-trigger').hidden=!!current||recycleOpen;$('#canvas-add-divider').hidden=!!current||recycleOpen;$('#viewer-image-trigger').hidden=readonly||node(current)?.kind!=='image';document.querySelector('#viewer [data-action="overview"]').textContent=recycleOpen?'← 返回回收站':'← 返回概览';updateHistoryButtons();if(current)viewer();else canvas();renderInspector();rememberView();}
 function fit(){if(current){if(node(current).kind==='note'){noteFit=true;sizeNote();$('#page-viewport').scrollTop=0;}else viewer();return;}const ns=activeCanvasNodes(),v=$('#canvas-viewport');if(!ns.length)return;const bounds=[...ns.map(n=>({x:n.x,y:n.y,width:canvasNodeWidth(n),height:canvasNodeHeight(n)})),...(recycleOpen?[]:canvasSections(model,moduleId))],minX=Math.min(...bounds.map(n=>n.x)),minY=Math.min(...bounds.map(n=>n.y)),maxX=Math.max(...bounds.map(n=>n.x+n.width)),maxY=Math.max(...bounds.map(n=>n.y+n.height));camera.scale=Math.max(.08,Math.min(1,(v.clientWidth-60)/(maxX-minX),(v.clientHeight-110)/(maxY-minY)));camera.x=(v.clientWidth-(maxX-minX)*camera.scale)/2-minX*camera.scale;camera.y=32-minY*camera.scale;transform();}
 function zoom(factor,event){
   if(current){const n=node(current);pageScale=Math.max(n.kind==='note' ? .03 : .08,Math.min(2.5,pageScale*factor));if(n.kind==='note'){noteFit=false;sizeNote();return;}const stage=$('#page-stage');stage.style.width=n.width*pageScale+'px';stage.style.height=n.height*pageScale+'px';const frame=stage.querySelector('iframe');if(frame)frame.style.transform=`scale(${pageScale})`;renderOverlays();transform();return;}
@@ -679,6 +708,7 @@ async function uploadImage(file){
 function pasteDescriptionImages(files,id,editor=null){
   if(readonly)return;if(pendingDescriptionNodes.has(id)){notice('图片正在上传，完成后可继续粘贴。',[],'image');return;}
   const target=node(id);if(!target)return;const before=canvasText(target),beforeHTML=editor?.innerHTML;let marker;
+  if(editor&&editor.yuanxingText!==before){notice('说明已在别处更新，请重新选择后再粘贴图片。',[],'image');return;}
   pendingDescriptionNodes.add(id);
   if(editor){const range=editorRange(editor);marker=document.createElement('span');marker.dataset.uploadPending='true';marker.className='image-uploading';marker.contentEditable='false';marker.textContent='图片上传中…';range.deleteContents();range.insertNode(marker);editor.dataset.uploading='true';editor.contentEditable='false';}
   const job=(async()=>{try{
@@ -687,12 +717,27 @@ function pasteDescriptionImages(files,id,editor=null){
     let text;
     if(editor){const fragment=document.createDocumentFragment();fragment.append(document.createElement('br'));for(const image of uploaded){const img=document.createElement('img');img.alt='说明图片';img.src=image.src;img.dataset.assetPath=image.path;fragment.append(img,document.createElement('br'));}marker.replaceWith(fragment);text=readDescription(editor);}
     else text=[before,...uploaded.map(image=>`![说明图片](${image.path})`)].filter(Boolean).join('\n\n');
-    inputGroup=null;edit(()=>writeCanvasExplanation(owner,text),false);updateNote(owner);
+    inputGroup=null;edit(()=>writeCanvasExplanation(owner,text),false,null,{background:true});updateNote(owner);
     if($('#message').dataset.kind==='image')$('#message').hidden=true;
-    if(editor?.isConnected){editor.innerHTML=richText(text);const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);}
+    if(editor?.isConnected){editor.yuanxingText=text;editor.innerHTML=richText(text);const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);}
     else if(selected?.id===id)renderInspector();
   }catch(error){if(editor)editor.innerHTML=beforeHTML;notice('图片未粘贴：'+error.message,[],'image');}
   finally{pendingDescriptionNodes.delete(id);if(editor){delete editor.dataset.uploading;editor.contentEditable='true';}}})();
+  pendingImages.add(job);job.finally(()=>pendingImages.delete(job));return job;
+}
+function pasteTextAreaImages(event,type,id,input){
+  const files=clipboardImages(event);if(!files.length)return;event.preventDefault();event.stopPropagation();if(readonly)return;
+  const key=type+':'+id,owner=()=>type==='edge'?model.edges.find(item=>item.id===id):node(id);if(pendingDescriptionNodes.has(key)){notice('图片正在上传，完成后可继续粘贴。',[],'image');return;}
+  const target=owner();if(!target)return;const before=canvasText(target),start=input.selectionStart??input.value.length,end=input.selectionEnd??start;if(input.value!==before){notice('说明已在别处更新，请重新选择后再粘贴图片。',[],'image');return;}
+  pendingDescriptionNodes.add(key);input.disabled=true;
+  const job=(async()=>{try{
+    const uploaded=[];for(const file of files){const image=await uploadImage(file);uploaded.push(image);bundle.images??={};bundle.images[image.path]=image.src;}
+    const current=owner();if(!current)throw new Error('内容已删除。');if(canvasText(current)!==before)throw new Error('说明已发生变化，请重新粘贴图片。');
+    const left=before.slice(0,start),right=before.slice(end),insert=uploaded.map(image=>`![说明图片](${image.path})`).join('\n\n'),text=left+(left&&!left.endsWith('\n')?'\n\n':'')+insert+(right&&!right.startsWith('\n')?'\n\n':'')+right;
+    inputGroup=null;edit(m=>{const value=type==='edge'?m.edges.find(item=>item.id===id):m.nodes.find(item=>item.id===id);if(value)writeCanvasExplanation(value,text);},false,null,{background:true});
+    if(input.isConnected){if(input.yuanxingSetValue)input.yuanxingSetValue(text);else input.value=text;}else if(selected?.type===type&&selected.id===id)renderInspector();if($('#message').dataset.kind==='image')$('#message').hidden=true;
+  }catch(error){notice('图片未粘贴：'+error.message,[],'image');}
+  finally{pendingDescriptionNodes.delete(key);input.disabled=false;}})();
   pendingImages.add(job);job.finally(()=>pendingImages.delete(job));return job;
 }
 function defaultInsertPoint(){const v=$('#canvas-viewport'),center=[(v.clientWidth/2-camera.x)/camera.scale-200,(v.clientHeight/2-camera.y)/camera.scale-145],candidates=[center],ns=activeCanvasNodes();
@@ -822,7 +867,7 @@ document.addEventListener('keydown',event=>{if(devMode&&event.key==='Escape'){ev
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();if(!panels.sidebar)togglePanel('sidebar');library.focusSearch();return;}
   if(!readonly&&!current&&selectedNodeIds().length&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&['Delete','Backspace'].includes(event.key)){event.preventDefault();deleteSelectedNodes();return;}
   if((event.ctrlKey||event.metaKey)&&!event.shiftKey&&event.key.toLowerCase()==='z'&&!readonly){event.preventDefault();activeCanvasGesture?.();action('undo');return;}if(!readonly&&!current&&!linesHidden&&selected?.type==='edge'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&['Delete','Backspace'].includes(event.key)){event.preventDefault();deleteSelectedConnection();}});
-window.addEventListener('beforeunload',event=>{saveView();const draft=annotationEditor?.querySelector('textarea');if(dirty||documentView.hasPendingChanges()||pendingImages.size||draft&&draft.value!==(model.annotations.find(a=>a.id===annotationEditorId)?.text||'')){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{saveView();const draft=annotationEditor?.querySelector('textarea'),lineDraft=connectionLabelEditor&&connectionLabelEditor.input.value.trim()!==connectionLabelEditor.initial.trim();if(dirty||conflict||lineDraft||documentView.hasPendingChanges()||pendingImages.size||draft&&draft.value!==(model.annotations.find(a=>a.id===annotationEditorId)?.text||'')){event.preventDefault();event.returnValue='';}});
 window.addEventListener('blur',()=>cancelConnection?.());
 window.addEventListener('resize',resizePage);
 $('#page-viewport').addEventListener('scroll',positionAnnotationEditor,{passive:true});
@@ -840,7 +885,7 @@ if(boot.projects?.length){
   const projectSelect=createSelect({label:'切换项目',variant:'yx-select-project',options:boot.projects.map(project=>({value:project.id,label:project.title})),value:boot.projectId,onChange:async id=>{
     const target=boot.projects.find(item=>item.id===id);if(!target||target.id===boot.projectId)return;
     projectSelect.setDisabled(true);activeCanvasGesture?.();closeAnnotationEditor();clearTimeout(timer);
-    try{if(pendingImages.size||pendingDescriptionNodes.size)throw new Error('图片正在保存，请稍后切换项目。');await save();if(dirty||saving||conflict)throw new Error('当前修改尚未保存，请先处理保存提示。');saveView();location.assign(target.url);}
+    try{await documentView.flush();if(pendingImages.size||pendingDescriptionNodes.size)throw new Error('内容正在保存，请稍后切换项目。');if(saveFlight)await saveFlight;await save();if(dirty||saving||conflict)throw new Error('当前修改尚未保存，请先处理保存提示。');saveView();location.assign(target.url);}
     catch(error){projectSelect.setValue(boot.projectId);projectSelect.setDisabled(false);notice(error.message,[],'save');}
   }});
   $('#project-title').hidden=true;projectHost.hidden=false;projectHost.append(projectSelect.element);
@@ -857,6 +902,11 @@ function runtimeUpdateBlocked(){
     if([...doc.querySelectorAll('.sixbot-composer__input,.sixbot-mobile__input')].some(el=>el.textContent?.trim()||el.querySelector?.('[data-mobile-skill],.sixbot-skill-token,.sixbot-query-token')))return true;
   }return false;
 }
+function flushModelRender(){
+  if(!pendingModelRender||dirty||saving||conflict||experience||!documentMode&&current||runtimeUpdateBlocked())return false;
+  pendingModelRender=false;renderAll();return true;
+}
+document.addEventListener('focusout',()=>setTimeout(flushModelRender,0));
 function reloadUpdatedWorkbench(){
   if(runtimeUpdateBlocked())return false;
   try{
@@ -878,6 +928,7 @@ function restoreRuntimeView(){
 async function refreshSources(){
   if(readonly||document.hidden||dirty||saving||conflict||sourceRefreshFlight||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return;
   if(runtimeUpdateBlocked())return;
+  flushModelRender();
   const requestedRevision=revision;sourceRefreshFlight=true;
   try{
     const metadata=await fetch(apiBase+'/api/project/status');if(!metadata.ok)return;const status=await metadata.json();
@@ -888,7 +939,7 @@ async function refreshSources(){
     const r=await fetch(apiBase+'/api/project');if(!r.ok)return;const next=await r.json();
     // 请求发出后可能发生剪切、粘贴及保存；旧响应不能替换更新后的本地状态。
     if(dirty||saving||revision!==requestedRevision||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId||runtimeUpdateBlocked()||document.activeElement?.matches('input,textarea,[contenteditable]'))return;
-    if(next.revision!==revision){model=next.model;baseModel=clone(model);revision=next.revision;history.clear();bundle=next;selected=null;if(!node(current))current=null;renderAll();}
+    if(next.revision!==revision){history.rebase(baseModel,next.model);model=next.model;baseModel=clone(model);revision=next.revision;bundle=next;selected=null;if(!node(current))current=null;renderAll();}
     else {next.images={...bundle.images,...next.images};const changed=next.sourcesSignature!==bundle.sourcesSignature,currentChanged=current&&canvasPreviewSignature(node(current),next)!==canvasPreviewSignature(node(current),bundle);bundle=next;if(changed){positions={};missing.clear();if(documentMode)documentView.render();else if(current){if(currentChanged)viewer();renderInspector();}else canvas();}}
   }catch{/* 本地服务暂不可用，已编辑内容留在内存，保存操作负责提示与重试。 */}
   finally{sourceRefreshFlight=false;}

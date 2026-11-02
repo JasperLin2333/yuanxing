@@ -40,7 +40,7 @@ test('空项目保留切换位置并禁用完整原型；离线分享返回画�
 test('进入完整原型不阻断进入前的自动保存，离线分享不能写入项目',async()=>{
   for(const originalReadonly of [false,true]){
     const {state:s,context}=setup(originalReadonly);let writes=0;
-    Object.assign(s,{baseModel:clone(s.model),mergeProject,dirty:true,conflict:false,saveFlight:null,saving:false,revision:'old',token:'session',validate:()=>[],updateHistoryButtons(){},scheduleSave(){},fetch:async(url,options)=>{writes++;assert.equal(url,'/api/project');assert.equal(options.method,'PUT');assert.deepEqual(JSON.parse(options.body).model,s.model);return {ok:true,status:200,json:async()=>({revision:'new'})};}});
+    Object.assign(s,{baseModel:clone(s.model),mergeProject,dirty:true,conflict:false,saveFlight:null,connectionLabelEditor:null,pendingModelRender:false,saving:false,revision:'old',token:'session',validate:()=>[],history:{rebase(){}},updateHistoryButtons(){},scheduleSave(){},flushModelRender(){},fetch:async(url,options)=>{writes++;assert.equal(url,'/api/project');assert.equal(options.method,'PUT');assert.deepEqual(JSON.parse(options.body).model,s.model);return {ok:true,status:200,json:async()=>({revision:'new'})};}});
     const save=app.slice(app.indexOf('async function save(){'),app.indexOf('async function reload('));vm.runInContext(save,context);s.startExperience();await s.save();assert.equal(writes,originalReadonly?0:1);if(!originalReadonly){assert.equal(s.dirty,false);assert.equal(s.revision,'new');}
   }
 });

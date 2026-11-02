@@ -201,7 +201,8 @@ export function pasteCanvasSelection(model,moduleId,clipboard,point=[80,80],{rec
   const nodes=source.nodes.map(n=>{
     const next={...n,id:nodeIds.get(n.id),module:recycle&&model.modules.some(m=>m.id===n.module)?n.module:moduleId,x:n.x+origin[0],y:n.y+origin[1]};delete next.reference;
     if(next.overviewAlias){if(nodeIds.has(next.overviewAlias))next.overviewAlias=nodeIds.get(next.overviewAlias);else delete next.overviewAlias;}delete next.section;
-    if(next.kind==='html'&&next.render&&/^canvas-states\/[\w-]+\.html$/.test(next.path)){next.path=`canvas-states/${next.id}.html`;delete next.copySourcePath;}
+    if(next.kind==='html'&&source.imported){delete next.copySourcePath;delete next.render;delete next.sources;}
+    else if(next.kind==='html'&&next.render&&/^canvas-states\/[\w-]+\.html$/.test(next.path)){next.path=`canvas-states/${next.id}.html`;delete next.copySourcePath;}
     else if(next.kind==='html'&&!next.render){next.copySourcePath=next.path;const slash=next.path.lastIndexOf('/');next.path=(slash<0?'':next.path.slice(0,slash+1))+next.id+'.html';}
     if(recycle){next.overview=false;delete next.overviewAlias;model.recyclePositions??={};model.recyclePositions[next.id]={x:next.x,y:next.y};}
     remapRule(next);return next;
@@ -694,6 +695,11 @@ export class History {
     this.group=group&&this.past.length?{id:group,time,snapshot}:null;
   }
   undo(model){this.group=null;return this.past.length?this.past.pop():model;}
+  rebase(base,remote){
+    const past=[];this.sizes=new WeakMap();
+    for(const snapshot of this.past){const next=mergeProject(base,snapshot,remote,{prefer:'remote'}).model;if(validate(next).length)continue;const size=JSON.stringify(next).length*2;this.sizes.set(next,size);past.push(next);}
+    this.past=past;while(this.past.length&&(this.past.length>this.maxEntries||this.bytes>this.maxBytes))this.past.shift();this.group=null;
+  }
   clear(){this.past=[];this.group=null;}
 }
 export function markdown(text, images={}, {sourceLines=false}={}) {
