@@ -707,12 +707,13 @@ export function markdown(text, images={}, {sourceLines=false}={}) {
   const lineAttribute=index=>sourceLines?` data-source-line="${index}"`:'';
   const inline=s=>{
     let result='',last=0;
-    for(const m of s.matchAll(/!\[([^\]\n]*)\]\(([^)\n]+)\)|`([^`]+)`|\*\*(.+?)\*\*|\*([^*\n]+)\*/g)){
+    for(const m of s.matchAll(/<span style="color:#d92d20">(.+?)<\/span>|!\[([^\]\n]*)\]\(([^)\n]+)\)|`([^`]+)`|\*\*(.+?)\*\*|\*([^*\n]+)\*/g)){
       result+=escapeHTML(s.slice(last,m.index));
-      if(m[2]!==undefined){const src=images[m[2]];result+=isImagePath(m[2])&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(src||'')?`<img src="${escapeHTML(src)}" alt="${escapeHTML(m[1])}" data-asset-path="${escapeHTML(m[2])}">`:`<span class="missing-image">${escapeHTML(m[1]||'图片')}（图片未载入）</span>`;}
-      else if(m[3]!==undefined)result+=`<code>${escapeHTML(m[3])}</code>`;
-      else if(m[4]!==undefined)result+=`<strong>${inline(m[4])}</strong>`;
-      else result+=`<em>${inline(m[5])}</em>`;
+      if(m[1]!==undefined)result+=`<span class="yx-important" data-yuanxing-important="true">${inline(m[1])}</span>`;
+      else if(m[3]!==undefined){const src=images[m[3]];result+=isImagePath(m[3])&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(src||'')?`<img src="${escapeHTML(src)}" alt="${escapeHTML(m[2])}" data-asset-path="${escapeHTML(m[3])}">`:`<span class="missing-image">${escapeHTML(m[2]||'图片')}（图片未载入）</span>`;}
+      else if(m[4]!==undefined)result+=`<code>${escapeHTML(m[4])}</code>`;
+      else if(m[5]!==undefined)result+=`<strong>${inline(m[5])}</strong>`;
+      else result+=`<em>${inline(m[6])}</em>`;
       last=m.index+m[0].length;
     }
     return result+escapeHTML(s.slice(last));
@@ -738,15 +739,21 @@ export function markdown(text, images={}, {sourceLines=false}={}) {
 // 说明编辑区只序列化文字、基础格式与已上传图片，不保留外部粘贴的 HTML。
 export function readDescription(root) {
   const children=el=>[...el.childNodes].reduce((text,child)=>{const block=child.nodeType===1&&['P','DIV','UL','OL','TABLE','H1','H2','H3','H4','H5','H6'].includes(child.tagName);return text+(block&&text&&!text.endsWith('\n')?'\n\n':'')+read(child);},'');
+  const important=value=>value?`<span style="color:#d92d20">${value}</span>`:'';
   function read(el){
     if(el.nodeType===3)return el.textContent.replace(/\u00a0/g,' ');
     if(el.nodeType!==1||el.hasAttribute('data-upload-pending'))return '';
     const tag=el.tagName;
     if(tag==='IMG'){const path=el.getAttribute('data-asset-path');return isImagePath(path)?`![${(el.getAttribute('alt')??'图片').replace(/[\[\]\n]/g,'')}](${path})`:'';}
     if(tag==='BR')return '\n';
+    if(tag==='SPAN'&&el.getAttribute?.('data-yuanxing-important')==='true')return important(children(el));
     if(tag==='STRONG'||tag==='B')return `**${children(el)}**`;
     if(tag==='EM'||tag==='I')return `*${children(el)}*`;
-    if(tag==='CODE')return '`'+children(el)+'`';
+    if(tag==='CODE'){
+      if(!el.querySelector?.('[data-yuanxing-important="true"]'))return '`'+children(el)+'`';
+      const code=node=>node.nodeType===3?'`'+node.textContent.replace(/\u00a0/g,' ')+'`':node.nodeType===1?(node.getAttribute?.('data-yuanxing-important')==='true'?important([...node.childNodes].map(code).join('')):[...node.childNodes].map(code).join('')):'';
+      return [...el.childNodes].map(code).join('');
+    }
     if(/^H[1-6]$/.test(tag))return '#'.repeat(Number(tag[1]))+' '+children(el)+'\n\n';
     if(tag==='UL'||tag==='OL')return [...el.children].map((li,index)=>(tag==='OL'?`${index+1}. `:'- ')+children(li).trim()).join('\n')+'\n\n';
     if(tag==='TABLE'){

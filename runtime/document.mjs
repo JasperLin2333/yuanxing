@@ -46,6 +46,42 @@ export function documentSourceRange(text,section,omitHeading=false) {
   return {start:offset,end:offset+selected.length,text:selected,headings};
 }
 export const extractDocumentSource=(text,section,omitHeading=false)=>documentSourceRange(text,section,omitHeading).text;
+
+// 只标记用户选中的文字，保留同一段落内的粗体、斜体和其他内容。
+function documentTextNodes(root){
+  const nodes=[];const visit=node=>{if(node.nodeType===3)nodes.push(node);else for(const child of node.childNodes||[])visit(child);};visit(root);return nodes;
+}
+function documentImportantAncestor(node,editor){
+  for(let parent=node.parentNode;parent&&parent!==editor;parent=parent.parentNode)if(parent.getAttribute?.('data-yuanxing-important')==='true')return parent;
+  return null;
+}
+export function documentImportantSelection(editor,range){
+  if(!range||range.collapsed||!editor.contains(range.startContainer)||!editor.contains(range.endContainer))return {parts:[],marked:false};
+  const parts=[];
+  for(const node of documentTextNodes(editor)){
+    if(!range.intersectsNode(node))continue;
+    const start=node===range.startContainer?range.startOffset:0,end=node===range.endContainer?range.endOffset:node.data.length;
+    if(start<end)parts.push({node,start,end});
+  }
+  return {parts,marked:parts.length>0&&parts.every(({node})=>!!documentImportantAncestor(node,editor))};
+}
+export function toggleDocumentImportant(editor,range){
+  const {parts,marked}=documentImportantSelection(editor,range);if(!parts.length)return null;
+  const doc=editor.ownerDocument,all=documentTextNodes(editor),markedNodes=new Set(all.filter(node=>documentImportantAncestor(node,editor))),markers=[];
+  const visit=node=>{if(node.nodeType===1&&node.getAttribute?.('data-yuanxing-important')==='true')markers.push(node);for(const child of node.childNodes||[])visit(child);};visit(editor);
+  for(const marker of markers.reverse()){while(marker.firstChild)marker.parentNode.insertBefore(marker.firstChild,marker);marker.remove();}
+  const makeMarker=()=>{const marker=doc.createElement('span');marker.className='yx-important';marker.setAttribute('data-yuanxing-important','true');return marker;};
+  for(const node of markedNodes){const marker=makeMarker();node.parentNode.insertBefore(marker,node);marker.append(node);}
+  for(const part of [...parts].reverse()){
+    let target=part.node;if(part.end<target.data.length)target.splitText(part.end);if(part.start>0)target=target.splitText(part.start);part.target=target;
+    const existing=documentImportantAncestor(target,editor);
+    if(marked&&existing){
+      if(target.nextSibling){const after=makeMarker();while(target.nextSibling)after.append(target.nextSibling);existing.parentNode.insertBefore(after,existing.nextSibling);}
+      existing.parentNode.insertBefore(target,existing.nextSibling);if(!existing.firstChild)existing.remove();
+    }else if(!marked&&!existing){const marker=makeMarker();target.parentNode.insertBefore(marker,target);marker.append(target);}
+  }
+  const selected=doc.createRange();selected.setStart(parts[0].target,0);const last=parts.at(-1).target;selected.setEnd(last,last.data.length);return selected;
+}
 // 直接编辑只替换实际文字所在行或单元格，保留其余 Markdown、章节及原有空白。
 export function patchDocumentSource(text,block,{line,column,before,value}) {
   const range=documentSourceRange(text,block.section,block.omitHeading),lines=range.text.split('\n');
@@ -232,6 +268,7 @@ export function createDocumentOutline({root,paper,nav,toolbar}) {
 export function createDocumentView(host) {
   const root=host.root,cache=new Map(),bindings=new Set(),drafts=new Map();
   let active=false,signature='',outline,sourceTimer,sourceFlight,readingPosition=null,restoreFrame=null;
+  let importantTool,importantRange,importantEditor;
   let outlineOpen=typeof matchMedia!=='function'||!matchMedia('(max-width:700px)').matches;
   const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
   const fieldChanged=callback=>host.changeText(model=>{ensureDocument(model);callback(model);});
@@ -248,6 +285,32 @@ export function createDocumentView(host) {
         binding.before=value;if(drafts.get(binding)===value)drafts.delete(binding);
       }
     })().finally(()=>{sourceFlight=null;if(!active&&!drafts.size)clearView();});return sourceFlight;
+  }
+  function hideImportantTool(){if(importantTool)importantTool.hidden=true;importantRange=null;importantEditor=null;}
+  function updateImportantTool(){
+    if(!active||!importantTool)return;
+    const selection=document.getSelection();if(!selection?.rangeCount||selection.isCollapsed){if(document.activeElement!==importantTool)hideImportantTool();return;}
+    const range=selection.getRangeAt(0),start=range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement;
+    const editor=start?.closest?.('[contenteditable="true"]');
+    if(!editor||!root.contains(editor)||editor.matches('h1,h2,h3,h4,h5,h6')||!editor.contains(range.endContainer)){hideImportantTool();return;}
+    const selected=documentImportantSelection(editor,range);if(!selected.parts.length){hideImportantTool();return;}
+    importantRange=range.cloneRange();importantEditor=editor;importantTool.textContent=selected.marked?'取消重点':'重点说明';importantTool.setAttribute('aria-pressed',String(selected.marked));
+    const rect=range.getBoundingClientRect();importantTool.hidden=false;
+    const width=importantTool.offsetWidth||76;importantTool.style.left=Math.max(8,Math.min(window.innerWidth-width-8,rect.left+(rect.width-width)/2))+'px';importantTool.style.top=Math.max(8,rect.top-40)+'px';
+  }
+  function startImportantTool(){
+    if(host.readonly||!document.body||!document.addEventListener)return;
+    importantTool=el('button','doc-important-tool');importantTool.type='button';importantTool.hidden=true;importantTool.setAttribute('aria-label','切换重点说明');
+    importantTool.onpointerdown=event=>event.preventDefault();
+    importantTool.onclick=()=>{
+      if(!importantEditor?.isConnected||!importantRange)return;
+      const editor=importantEditor,selection=document.getSelection(),next=toggleDocumentImportant(editor,importantRange);if(!next)return;
+      editor.focus({preventScroll:true});selection.removeAllRanges();selection.addRange(next);editor.oninput?.();updateImportantTool();
+    };
+    document.body.append(importantTool);document.addEventListener('selectionchange',updateImportantTool);root.addEventListener('scroll',hideImportantTool);window.addEventListener('resize',hideImportantTool);
+  }
+  function stopImportantTool(){
+    if(!importantTool)return;document.removeEventListener('selectionchange',updateImportantTool);root.removeEventListener('scroll',hideImportantTool);window.removeEventListener('resize',hideImportantTool);importantTool.remove();importantTool=null;importantRange=null;importantEditor=null;
   }
   function pasteText(event,editor,inline=false){
     event.preventDefault();let value=event.clipboardData?.getData('text/plain')||'';if(inline)value=value.replace(/[\r\n]+/g,' ');
@@ -301,7 +364,7 @@ export function createDocumentView(host) {
     if(signature===next)return;signature=next;
     readingPosition=outline?.capture()||readingPosition;
     const scroll=root.scrollTop,outlineScroll=root.querySelector('.doc-outline-list')?.scrollTop||0,used=new Set();walkDocument(doc.blocks,block=>used.add(block.id));for(const [id,entry] of cache)if(!used.has(id)){entry.dispose?.();cache.delete(id);}
-    outline?.dispose();bindings.clear();root.replaceChildren();
+    hideImportantTool();outline?.dispose();bindings.clear();root.replaceChildren();
     const sidebar=el('aside','doc-outline'),nav=el('nav','doc-outline-list');sidebar.id='yuanxing-document-outline';sidebar.setAttribute('aria-label','需求文档目录');nav.setAttribute('aria-label','章节定位');sidebar.append(el('div','doc-outline-title','目录'),nav);sidebar.hidden=!outlineOpen;root.classList.toggle('doc-outline-collapsed',!outlineOpen);
     const main=el('div','doc-main'),paper=el('article','doc-paper'),heading=el('h1','doc-title',doc.title||model.title);
     editable(heading,()=>fieldChanged(model=>model.document.title=heading.textContent),{inline:true});
@@ -314,7 +377,7 @@ export function createDocumentView(host) {
     capturePosition(){return active&&outline?{...outline.capture(),outlineOpen}:readingPosition;},
     restorePosition(position){if(!position||typeof position!=='object')return;readingPosition=position;if(typeof position.outlineOpen==='boolean')outlineOpen=position.outlineOpen;if(active)outline?.restore(position);},
     toggleOutline(){outlineOpen=!outlineOpen;root.classList.toggle('doc-outline-collapsed',!outlineOpen);const sidebar=root.querySelector('.doc-outline');if(sidebar)sidebar.hidden=!outlineOpen;outline?.refresh();},
-    enter(){active=true;if(drafts.size||sourceFlight){outline?.refresh();return;}signature='';render();},leave(){readingPosition=outline?{...outline.capture(),outlineOpen}:readingPosition;active=false;if(restoreFrame!==null)cancelAnimationFrame(restoreFrame);restoreFrame=null;clearTimeout(sourceTimer);if(drafts.size||sourceFlight){flushSources().catch(reportSourceError);return;}clearView();},
+    enter(){active=true;if(!importantTool)startImportantTool();if(drafts.size||sourceFlight){outline?.refresh();return;}signature='';render();},leave(){readingPosition=outline?{...outline.capture(),outlineOpen}:readingPosition;active=false;stopImportantTool();if(restoreFrame!==null)cancelAnimationFrame(restoreFrame);restoreFrame=null;clearTimeout(sourceTimer);if(drafts.size||sourceFlight){flushSources().catch(reportSourceError);return;}clearView();},
     isBusy(){return !!drafts.size||!!sourceFlight||root.contains(document.activeElement)&&document.activeElement?.matches('[contenteditable],input,select')||[...cache.values()].some(entry=>entry.isBusy?.());}
   };
 }

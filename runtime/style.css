@@ -87,6 +87,7 @@ textarea{min-height:112px;resize:vertical}
 .markdown p{margin:8px 0;overflow-wrap:anywhere}
 .markdown ul{padding-left:20px}
 .markdown strong{font-weight:600}
+.markdown .yx-important{color:#d92d20}
 .markdown code{padding:2px 4px;border-radius:var(--radius);background:var(--hover)}
 .markdown table{width:100%;border-collapse:collapse;font-size:13px}
 .markdown td,.markdown th{padding:8px;border:1px solid var(--line);text-align:left}
@@ -372,6 +373,9 @@ body.document-mode #sidebar,body.document-mode #inspector,body.document-mode .zo
 .doc-text p{margin:0 0 8px}.doc-text p:last-child{margin-bottom:0}
 .doc-text:empty:before{content:attr(data-placeholder);color:#adb4bf;pointer-events:none}
 .doc-text[contenteditable=true]:focus,.doc-source [contenteditable=true]:focus{box-shadow:inset 0 -1px 0 #d8e6df}
+.doc-important-tool{position:fixed;z-index:10000;min-height:30px;padding:4px 10px;color:#d92d20;background:#fff;border:1px solid #e1e5eb;border-radius:5px;box-shadow:0 3px 12px #1c2a4024;font-size:12px;white-space:nowrap}
+.doc-important-tool[hidden]{display:none}
+.doc-important-tool:hover,.doc-important-tool:focus-visible{background:#fff2f0}
 h2.doc-text{font-size:24px;line-height:1.6;margin:26px 0 12px}h3.doc-text{font-size:20px;line-height:1.6;margin:20px 0 10px}h4.doc-text{font-size:17px;line-height:1.6;margin:16px 0 8px}
 blockquote.doc-text{border-left:3px solid #b6c8bc;margin:8px 0;padding:6px 16px;color:#667268;background:#f7faf8}
 .doc-grid{display:grid;min-width:0;align-items:stretch;gap:0}
