@@ -46,17 +46,27 @@ export function connectionDirections(edge,from,to){
   const side=horizontal?(dx<0?'left':'right'):(dy<0?'top':'bottom'),opposite={top:'bottom',bottom:'top',left:'right',right:'left'};
   return [edge.fromSide||side,edge.toSide||opposite[side]];
 }
-export function connectionTarget(nodes,point,{exclude=[],tolerance=24,side=null}={}){
+// 靠近端点（tolerance 内）吸附到该端点；落在页面内部但不靠近端点时，选面向来源 toward 的一侧，未提供来源时取最近一侧。
+export function connectionTarget(nodes,point,{exclude=[],tolerance=24,side=null,toward=null}={}){
   const excluded=new Set(exclude);let best=null;
   for(const n of nodes){
     if(excluded.has(n.id))continue;
     const inside=point[0]>=n.x&&point[0]<=n.x+canvasNodeWidth(n)&&point[1]>=n.y&&point[1]<=n.y+canvasNodeHeight(n);
-    for(const candidate of side?[side]:connectionSides){
-      const anchor=connectionPoint(n,candidate),distance=Math.hypot(anchor[0]-point[0],anchor[1]-point[1]);if(!inside&&distance>tolerance)continue;
-      const score=distance-(inside?1e6:0);if(!best||score<best.score)best={node:n,side:candidate,point:anchor,distance,score};
-    }
+    const anchors=(side?[side]:connectionSides).map(candidate=>{const anchor=connectionPoint(n,candidate);return {candidate,anchor,distance:Math.hypot(anchor[0]-point[0],anchor[1]-point[1])};});
+    let pick=anchors.reduce((a,b)=>b.distance<a.distance?b:a);
+    if(inside&&!side&&toward&&toward.id!==n.id&&pick.distance>tolerance){const facing=connectionDirections({},toward,n)[1];pick=anchors.find(item=>item.candidate===facing)||pick;}
+    if(!inside&&pick.distance>tolerance)continue;
+    const score=pick.distance-(inside?1e6:0);if(!best||score<best.score)best={node:n,side:pick.candidate,point:pick.anchor,distance:pick.distance,score};
   }
   return best;
+}
+// 拖线时游离端的朝向：已有朝向时，只有主方向明显改变才切换，避免光标越过对角线时预览折线来回跳。
+export function looseConnectionSide(fixed,point,previous=null){
+  const w=canvasNodeWidth(fixed),h=canvasNodeHeight(fixed),dx=point[0]-fixed.x-w/2,dy=point[1]-fixed.y-h/2;
+  const xGap=Math.abs(dx)-w/2-8,yGap=Math.abs(dy)-h/2-8,ratio=(Math.abs(dx)/(w+16))/Math.max(1e-6,Math.abs(dy)/(h+16));
+  const wasHorizontal=previous?['left','right'].includes(previous):null,bias=wasHorizontal===null?1:wasHorizontal?1/1.25:1.25;
+  const horizontal=xGap>=0&&(yGap<0||ratio>=bias);
+  return horizontal?(dx<0?'right':'left'):(dy<0?'bottom':'top');
 }
 // 预览与提交使用同一组节点、端口及避障计算；游离端点只在预览期间存在。
 export function previewConnection(nodes,fixed,fixedSide,target,targetSide,{endpoint='to',branch=false}={}){
@@ -139,6 +149,16 @@ export function moveCanvasNodes(model,moduleId,positions){
     }
     if(n.reference)model.referencePositions[moduleId][n.id]={x:position.x,y:position.y};
     else Object.assign(model.nodes.find(owner=>owner.id===n.id),{x:position.x,y:position.y});
+  }
+  // 分叉点只有一条主干时跟随主干来源平移，主干线形保持不变；分支线再重新计算。显式一起移动的分叉点按所给位置处理。
+  const explicit=new Set(positions.map(position=>position.id));
+  for(let grew=true;grew;){grew=false;
+    for(const junction of visible.filter(isBranch)){
+      if(explicit.has(junction.id)||deltas.has(junction.id))continue;
+      const trunks=model.edges.filter(e=>e.to===junction.id),delta=trunks.length===1&&deltas.get(trunks[0].from);if(!delta)continue;
+      const owner=model.nodes.find(node=>node.id===junction.id);if(!owner)continue;
+      Object.assign(owner,{x:owner.x+delta[0],y:owner.y+delta[1]});deltas.set(junction.id,delta);grew=true;
+    }
   }
   // 整组平移时，组内手动折点和文字一起平移；单独移动端点时保留手动经过点。
   for(const edge of overviewEdges(model)){const a=deltas.get(edge.from),b=deltas.get(edge.to);if(!a||!b||a[0]!==b[0]||a[1]!==b[1])continue;const owner=model.edges.find(e=>e.id===edge.id);
@@ -322,7 +342,10 @@ function manualConnectionRoute(start,end,fromSide,toSide,waypoints,fromBranch=fa
 export function routeConnections(nodes,edges,options={}){
   const byId=new Map(nodes.map(n=>[n.id,n])),obstacles=nodes.filter(n=>!isBranch(n)).map(n=>({x:n.x,y:n.y,width:canvasNodeWidth(n),height:canvasNodeHeight(n)}));
   const lines=edges.filter(e=>byId.has(e.from)&&byId.has(e.to)&&!(byId.get(e.from).reference&&byId.get(e.to).reference)).map(edge=>{const from=byId.get(edge.from),to=byId.get(edge.to),[fromSide,toSide]=connectionDirections(edge,from,to);return {edge,from,to,fromSide,toSide,start:connectionPoint(from,fromSide),end:connectionPoint(to,toSide)};});
-  return solveConnections(nodes,lines,{...options,manualRoute:line=>manualConnectionRoute(line.start,line.end,line.fromSide,line.toSide,line.edge.waypoints,isBranch(line.from),isBranch(line.to)),fallbackRoute:line=>connectionRoute(line.start,line.end,line.fromSide,line.toSide,obstacles,isBranch(line.from)||isBranch(line.to))});
+  const solved=solveConnections(nodes,lines,{...options,manualRoute:line=>manualConnectionRoute(line.start,line.end,line.fromSide,line.toSide,line.edge.waypoints,isBranch(line.from),isBranch(line.to)),fallbackRoute:line=>connectionRoute(line.start,line.end,line.fromSide,line.toSide,obstacles,isBranch(line.from)||isBranch(line.to))});
+  // 路径被挡住时不提交，但保留一条忽略障碍的示意线，让用户看见线在哪里、为什么不可用。
+  for(const line of solved)if(line.route.blocked)line.route.overlay=connectionRoute(line.start,line.end,line.fromSide,line.toSide,[],isBranch(line.from)||isBranch(line.to)).points;
+  return solved;
 }
 // 无效的拖动不写入折点，保留上一个可用位置。
 export function adjustConnectionSegment(nodes,edge,points,index,delta){

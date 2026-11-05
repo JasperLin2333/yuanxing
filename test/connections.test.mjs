@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {clone,connectionPoint,connectionDirections,connectionTarget,connectionDisplayPath,previewConnection,routeConnections,overviewEdges,createLineBranch,lineBranchSplit,connectNodes,reconnectEdge,isBranch,moveCanvasNodes,snapNodePosition,validate,canvasNodeWidth,canvasNodeHeight,placeConnectionLabels} from '../runtime/core.mjs';
+import {clone,looseConnectionSide,connectionPoint,connectionDirections,connectionTarget,connectionDisplayPath,previewConnection,routeConnections,overviewEdges,createLineBranch,lineBranchSplit,connectNodes,reconnectEdge,isBranch,moveCanvasNodes,snapNodePosition,validate,canvasNodeWidth,canvasNodeHeight,placeConnectionLabels} from '../runtime/core.mjs';
 
 const source=await readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8');
 const page=(id,x,y)=>({id,module:'flow',kind:'note',title:id,x,y,width:1280,height:800,description:''});
@@ -56,7 +56,7 @@ function controllerFixture(){
   const classList=()=>{const names=new Set();return {add:n=>names.add(n),remove:n=>names.delete(n),contains:n=>names.has(n),toggle(n,on){if(on)names.add(n);else names.delete(n);}};};
   const element=()=>({dataset:{},attrs:{},style:{},classList:classList(),setAttribute(k,v){this.attrs[k]=v;},append(){},remove(){this.removed=true;},focus(){}});
   const svg=element(),world=element(),viewport=element(),cards=new Map(model.nodes.map(n=>[n.id,element()]));
-  const state={model,selected:null,spacePressed:false,readonly:false,camera:{scale:1},cancelConnection:null,activeCanvasGesture:null,connectionTarget,connectionDisplayPath,previewConnection,connectionPoint,connectionDirections,overviewEdges,createLineBranch,connectNodes,reconnectEdge,clone,
+  const state={model,selected:null,spacePressed:false,readonly:false,camera:{scale:1},cancelConnection:null,activeCanvasGesture:null,connectionTarget,looseConnectionSide,notices:[],notice(text){state.notices.push(text);},connectionDisplayPath,previewConnection,connectionPoint,connectionDirections,overviewEdges,createLineBranch,connectNodes,reconnectEdge,clone,
     activeCanvasNodes:()=>state.model.nodes,canvasPoint:e=>[e.clientX,e.clientY],closeMenus(){},renderInspector(){},drawLines(){},writes:0,undo:[],edit(fn){state.undo.push(clone(state.model));fn(state.model);state.writes++;},
     requestAnimationFrame(fn){frames.set(++frameId,fn);return frameId;},cancelAnimationFrame(id){frames.delete(id);},
     $:selector=>selector==='#lines'?svg:selector==='#canvas-world'?world:viewport,
@@ -75,6 +75,7 @@ test('分叉既能拖拽松手提交，也能点击再选目标；取消与无�
     if(mode==='outside')listeners.get('pointerup')(event('pointerup',3000,3000));
     if(['drag','click'].includes(mode)){assert.equal(s.writes,1);assert.equal(s.model.nodes.filter(isBranch).length,1);assert.deepEqual(s.undo[0],before);assert.deepEqual(validate(s.model),[]);}
     else{assert.equal(s.writes,0);assert.deepEqual(s.model,before);}
+    assert.equal(s.notices.length,mode==='outside'?1:0,mode);
     assert.equal(s.cancelConnection,null);assert.equal(listeners.size,0);
   }
 });
@@ -104,4 +105,58 @@ test('直接编辑名称只在保存时写入，Esc 放弃，按钮绑定与流�
     vm.runInContext(source.slice(source.indexOf('function editConnectionLabel('),source.indexOf('function drawAlignmentGuides(')),vm.createContext(state));state.editConnectionLabel('ab',event);input.value='查看详情';input.onkeydown({...event,key:save?'Enter':'Escape'});
     assert.equal(writes,save?1:0);assert.equal(model.edges[0].label,save?'查看详情':'打开');assert.equal(model.edges[0].selector,'#open');assert.deepEqual(model.nodes,before.nodes);
   }
+});
+
+test('落在页面内部且不靠近端点时，选面向来源的一侧；靠近端点仍吸附到端点',()=>{
+  const nodes=[page('a',0,0),page('b',1000,0),page('c',1000,700),page('d',0,700)],a=nodes[0];
+  assert.equal(connectionTarget(nodes,[1200,145],{exclude:['a'],toward:a}).side,'left');
+  assert.equal(connectionTarget(nodes,[1200,145],{exclude:['a'],toward:a}).node.id,'b');
+  assert.equal(connectionTarget(nodes,[200,845],{exclude:['a'],toward:a}).side,'top');assert.equal(connectionTarget(nodes,[200,845],{exclude:['a'],toward:a}).node.id,'d');
+  assert.equal(connectionTarget(nodes,[1200,145],{exclude:['a']}).node.id,'b');
+  assert.equal(connectionTarget(nodes,[1390,145],{exclude:['a'],toward:a,tolerance:32}).side,'right');
+  assert.equal(connectionTarget(nodes,[1200,145],{exclude:['a'],toward:a,side:'bottom'}).side,'bottom');
+});
+test('游离端朝向只在主方向明显改变时切换，不在对角线附近来回跳',()=>{
+  const fixed=page('a',0,0);
+  assert.equal(looseConnectionSide(fixed,[700,145]),'left');assert.equal(looseConnectionSide(fixed,[200,700]),'top');
+  let side=looseConnectionSide(fixed,[700,300]);assert.equal(side,'left');
+  const flips=new Set();for(let y=300;y<=420;y+=4){const next=looseConnectionSide(fixed,[700,y],side);if(next!==side)flips.add(y);side=next;}
+  assert(flips.size<=1,'对角线附近至多切换一次');
+  assert.equal(looseConnectionSide(fixed,[200,-300],'left'),'bottom');
+});
+test('页面挡住路径时仍给出示意线且不提交；被挡连线不会消失',()=>{
+  const nodes=[page('a',0,0),page('b',1000,0),page('cover',350,0)];
+  const line=routeConnections(nodes,[{id:'ab',from:'a',to:'b',fromSide:'right',toSide:'left'}],{scope:'overlay'})[0];
+  assert.equal(line.route.blocked,true);assert.deepEqual(line.route.points,[]);
+  assert(line.route.overlay.length>=2);assert.deepEqual(line.route.overlay[0],line.start);assert.deepEqual(line.route.overlay.at(-1),line.end);
+  const preview=previewConnection(nodes,nodes[0],'right',nodes[1],'left');assert.equal(preview.route.blocked,true);assert(preview.route.overlay.length>=2);
+});
+test('拖线松手：空白处与被挡方向取消并提示，轻点端口不提示，改接来源清绑定时提示',()=>{
+  let c=controllerFixture(),s=c.state,before=clone(s.model);
+  s.dragConnection(c.event('pointerdown',400,145),s.model.nodes[0],'right');c.listeners.get('pointermove')(c.event('pointermove',700,600));c.listeners.get('pointerup')(c.event('pointerup',700,600));
+  assert.equal(s.writes,0);assert.deepEqual(s.model,before);assert.equal(s.notices.length,1);assert.match(s.notices[0],/连接点/);
+  c=controllerFixture();s=c.state;s.dragConnection(c.event('pointerdown',400,145),s.model.nodes[0],'right');c.listeners.get('pointerup')(c.event('pointerup',400,145));assert.equal(s.notices.length,0);assert.equal(s.writes,0);
+  c=controllerFixture();s=c.state;const edge=overviewEdges(s.model)[0];
+  s.dragConnection(c.event('pointerdown',0,145),s.model.nodes[1],'left',edge,'from');c.listeners.get('pointermove')(c.event('pointermove',1200,845));c.listeners.get('pointerup')(c.event('pointerup',1200,845));
+  assert.equal(s.writes,1);assert.equal(s.model.edges[0].from,'c');assert.equal(s.model.edges[0].selector,undefined);assert.equal(s.notices.length,1);assert.match(s.notices[0],/绑定已清除/);
+});
+test('选中连线只常显两端把手（线段把手悬停才出现），端口悬浮即现，拖线时候选页面都显示连接点',async()=>{
+  const css=await readFile(new URL('../runtime/style.css',import.meta.url),'utf8');
+  assert.match(css,/\.node:hover \.node-port/);assert.match(css,/\.connecting \.node:not\(\.branch\) \.node-port\{opacity:\.35;visibility:visible\}/);
+  assert(!/\.edge-endpoint\{[^}]*opacity:0/.test(css));assert.match(css,/\.edge-bend\{[^}]*opacity:0/);assert.match(css,/\.edge-segment-control:hover \.edge-bend\{opacity:1/);assert.match(css,/path\.flow\.blocked/);
+});
+test('移动主干来源页面时，分叉点和主干折点一起平移，分支目标不被带动',()=>{
+  const m=fixture(),original=splitLine(m),result=createLineBranch(m,'ab','c',original.split.point,'left',original.route),branch=m.nodes.find(n=>n.id===result.groupId);
+  const trunk=m.edges.find(e=>e.to===branch.id),before={branch:[branch.x,branch.y],b:[m.nodes[1].x,m.nodes[1].y],c:[m.nodes[2].x,m.nodes[2].y],way:clone(trunk.waypoints||[])};
+  const moved=moveCanvasNodes(m,'flow',[{id:'a',x:0,y:100}]);
+  assert(moved.includes('a')&&moved.includes(branch.id));assert.deepEqual([branch.x,branch.y],[before.branch[0],before.branch[1]+100]);
+  assert.deepEqual([m.nodes[1].x,m.nodes[1].y],before.b);assert.deepEqual([m.nodes[2].x,m.nodes[2].y],before.c);
+  assert.deepEqual(trunk.waypoints||[],before.way.map(([x,y])=>[x,y+100]));assert.deepEqual(validate(m),[]);
+  const other=moveCanvasNodes(m,'flow',[{id:'b',x:1000,y:60}]);assert.deepEqual(other,['b']);
+});
+test('选中连线的「＋」默认收起，靠近线时才显示并贴着最近的一点',async()=>{
+  const css=await readFile(new URL('../runtime/style.css',import.meta.url),'utf8');
+  assert.match(css,/\.edge-fork-control\{[^}]*opacity:0/);assert.match(css,/\.edge-fork-control\.active/);
+  assert(source.includes('lineBranchSplit(route.points,canvasPoint(event))'));
+  const near=lineBranchSplit([[0,0],[100,0],[100,200]],[100,150]);assert.deepEqual(near.point,[100,150]);assert.equal(near.side,'bottom');
 });

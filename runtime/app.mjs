@@ -1,6 +1,6 @@
 import {handoffAncestors,handoffClean,collectHandoff,handoffDocument,handoffPrompt,createDOMPicker} from './handoff.mjs';
 import {clone,offlineExportHTML,uid,escapeHTML as esc,validate,moduleNodes,orderedModuleNodes,canvasSections,overviewEdges,removeConnections,removeNodes,removeCanvasNodes,reconnectEdge,createLineBranch,lineBranchSplit,connectNodes,nodesInRect,canvasSelection,snapNodeGroup,moveCanvasNodes,routeConnections,placeConnectionLabels,isBranch,History,markdown,expandHTML,readDescription,eligibleEdges,nextContext,initialNodeContext,connectionSides,connectionPoint,connectionPath,connectionDirections,adjustConnectionSegment,canvasNodeWidth,canvasNodeHeight,canvasNodeType,thumbnailLayout,wheelZoomFactor,zoomCamera,restoreView,mergeProject,recycleNodes,recycleCanvasNodes,moveRecycleNodes,cutCanvasSelection,imagePasteTarget,replaceCanvasImage,canvasClipboardAssets,canvasPreviewSignature} from './core.mjs';
-import {requirementText,canvasExplanation,writeCanvasExplanation,connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
+import {looseConnectionSide,requirementText,canvasExplanation,writeCanvasExplanation,connectionTarget,previewConnection,connectionDisplayPath,alignCanvasNodes,distributeCanvasNodes,nudgeCanvasNodes,copyCanvasSelection,pasteCanvasSelection} from './core.mjs';
 import {createLibrary,libraryStyles,reconcileCanvasCards,initializeCanvasThumbnail} from './library.mjs';
 import {prototypeDocument,thumbnailHTML,flowEntries,cleanContext,createPreviewQueue,bindNativeDocument} from './player.mjs';
 import {createProjectExtension} from './extension.mjs';
@@ -248,7 +248,7 @@ function addModule(){
   if(!panels.inspector)togglePanel('inspector');const input=$('#inspector input');input?.focus();input?.select();
 }
 function selectModule(id){closeAnnotationEditor();saveCanvasCamera();recycleOpen=false;moduleId=id;current=null;selected=null;mode=null;flowContext=clone(model.contextDefaults||{});camera=clone(cameras[id]||{x:30,y:30,scale:.8});renderAll();if(!cameras[id])fit();}
-function transform(){ $('#canvas-world').style.transform=`translate(${camera.x}px,${camera.y}px) scale(${camera.scale})`;$('#canvas-world').style.setProperty('--port-scale',1/camera.scale);document.querySelectorAll('#lines marker').forEach(positionArrow);document.querySelectorAll('#lines .edge-endpoint-control').forEach(positionEndpoint);document.querySelectorAll('#lines .edge-fork,#lines .edge-fork-hit,#lines .edge-fork-plus,#lines .edge-fork-stem').forEach(positionFork);document.querySelectorAll('#lines .edge-bend').forEach(positionBend);const percent=Math.round((current?pageScale:camera.scale)*100);zoomSelect.setValue(String(percent),percent+'%');rememberView();positionAnnotationEditor();}
+function transform(){ $('#canvas-world').style.transform=`translate(${camera.x}px,${camera.y}px) scale(${camera.scale})`;$('#canvas-world').style.setProperty('--port-scale',handleUnit());document.querySelectorAll('#lines marker').forEach(positionArrow);document.querySelectorAll('#lines .edge-endpoint-control').forEach(positionEndpoint);document.querySelectorAll('#lines .edge-fork,#lines .edge-fork-hit,#lines .edge-fork-plus,#lines .edge-fork-stem').forEach(positionFork);document.querySelectorAll('#lines .edge-bend').forEach(positionBend);const percent=Math.round((current?pageScale:camera.scale)*100);zoomSelect.setValue(String(percent),percent+'%');rememberView();positionAnnotationEditor();}
 function visibleRect(frame,el){
   const doc=frame.contentDocument,win=frame.contentWindow;
   let r=el.getBoundingClientRect(),left=Math.max(0,r.left),top=Math.max(0,r.top),right=Math.min(win.innerWidth,r.right),bottom=Math.min(win.innerHeight,r.bottom);
@@ -294,7 +294,9 @@ function canvas(){
     let header=card.querySelector('.node-header');if(!header){header=document.createElement('div');header.className='node-header';card.prepend(header);}header.title=n.title;header.innerHTML=`<span>${esc(n.title)}</span>${recycleOpen?`<span class="ref-label">${esc(model.modules.find(m=>m.id===n.module)?.title||'')}</span>`:n.reference?'<span class="ref-label">关联页面</span>':''}`;
     if(n.kind==='image'&&!readonly){const replace=document.createElement('button');replace.className='node-image-actions';replace.type='button';replace.textContent='替换图片';replace.title='替换图片（也可粘贴新图）';replace.onclick=event=>{event.stopPropagation();selectNodes([n.id]);chooseImageReplacement(n.id);};header.append(replace);}
     card.querySelectorAll('.node-port').forEach(port=>port.remove());
-    if(!readonly&&!recycleOpen)for(const side of connectionSides){const port=document.createElement('button');port.className='node-port';port.dataset.side=side;port.setAttribute('aria-label',`从「${n.title}」${{top:'上',right:'右',bottom:'下',left:'左'}[side]}侧拖动连线`);port.title='拖到另一个页面';port.onpointerdown=event=>dragConnection(event,n,side);port.onclick=event=>event.stopPropagation();card.append(port);}
+    // 分叉点只在尚未使用的方向放连接点，避免四个点围着一个点。
+    const usedSides=isBranch(n)?new Set(model.edges.filter(e=>e.from===n.id||e.to===n.id).map(e=>e.from===n.id?e.fromSide:e.toSide).filter(Boolean)):new Set(),portSides=usedSides.size<4?connectionSides.filter(side=>!usedSides.has(side)):connectionSides;
+    if(!readonly&&!recycleOpen)for(const side of portSides){const port=document.createElement('button');port.className='node-port';port.dataset.side=side;port.setAttribute('aria-label',`从「${n.title}」${{top:'上',right:'右',bottom:'下',left:'左'}[side]}侧拖动连线`);port.title='拖到另一个页面';port.onpointerdown=event=>dragConnection(event,n,side);port.onclick=event=>event.stopPropagation();card.append(port);}
     return card;
   });
   observePreviews(ns);drawLines();transform();
@@ -323,9 +325,9 @@ function paintLines(){
     const select=()=>{selected={type:'edge',id:e.id};$('#canvas-viewport').focus({preventScroll:true});highlightCards();renderInspector();drawLines();};
     const key=edges[0].id;kept.add(key);let view=views.get(key);
     if(!view){view={path:document.createElementNS('http://www.w3.org/2000/svg','path'),hit:document.createElementNS('http://www.w3.org/2000/svg','path')};view.path.classList.add('flow');view.hit.classList.add('flow-hit');pathsLayer.append(view.hit,view.path);views.set(key,view);}
-    const {path,hit}=view,active=edges.some(e=>selected?.id===e.id||model.annotations.find(a=>a.id===selected?.id)?.edge===e.id),display=connectionDisplayPath(route.points,8,ns);
-    path.dataset.edge=hit.dataset.edge=e.id;path.classList.toggle('selected',active);path.setAttribute('d',display);path.setAttribute('marker-end',isBranch(to)?'none':`url(#${active?'arrow-active':'arrow'})`);path.onclick=hit.onclick=select;
-    hit.setAttribute('d',display);hit.setAttribute('tabindex','0');hit.setAttribute('role','button');hit.setAttribute('aria-label',(e.condition||e.label||'连线')+'，双击编辑名称');
+    const {path,hit}=view,active=edges.some(e=>selected?.id===e.id||model.annotations.find(a=>a.id===selected?.id)?.edge===e.id),shown=route.blocked?route.overlay||[]:route.points,display=connectionDisplayPath(shown,8,ns);
+    path.dataset.edge=hit.dataset.edge=e.id;path.classList.toggle('selected',active);path.classList.toggle('blocked',!!route.blocked);path.setAttribute('d',display);path.setAttribute('marker-end',isBranch(to)?'none':`url(#${active?'arrow-active':'arrow'})`);path.onclick=hit.onclick=select;path.onpointermove=hit.onpointermove=null;
+    hit.setAttribute('d',display);hit.setAttribute('tabindex','0');hit.setAttribute('role','button');hit.setAttribute('aria-label',(e.condition||e.label||'连线')+(route.blocked?'，被页面挡住，请调整页面位置或改接':'')+'，双击编辑名称');
     path.onpointerenter=hit.onpointerenter=()=>{path.classList.add('hovered');if(!isBranch(to))path.setAttribute('marker-end','url(#arrow-active)');};path.onpointerleave=hit.onpointerleave=()=>{path.classList.remove('hovered');if(!isBranch(to))path.setAttribute('marker-end',`url(#${active?'arrow-active':'arrow'})`);};
     path.ondblclick=hit.ondblclick=event=>editConnectionLabel(e.id,event);hit.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();select();editConnectionLabel(e.id,event);}};
     const placement=labels.get(line.edge.id);
@@ -338,19 +340,25 @@ function paintLines(){
     }else if(view.labelGroup){view.labelGroup.remove();view.labelGroup=null;view.leader?.remove();view.leader=null;}
     if(!readonly&&selected?.type==='edge'&&selected.id===e.id){
       const geometry=document.createElementNS('http://www.w3.org/2000/svg','g');geometry.classList.add('edge-geometry-controls');
+      // 「＋」不固定在某处：鼠标在线上移动时贴着最近的一点显示，离开后收起。
+      const forkHover={show:null,hide:null};path.onpointermove=hit.onpointermove=event=>forkHover.show?.(event);
       for(let i=0;i<route.points.length-1;i++){
         const a=route.points[i],b=route.points[i+1];if(Math.hypot(b[0]-a[0],b[1]-a[1])<30)continue;
         const segment=document.createElementNS('http://www.w3.org/2000/svg','g'),area=document.createElementNS('http://www.w3.org/2000/svg','path'),control=document.createElementNS('http://www.w3.org/2000/svg','rect');
         segment.classList.add('edge-segment-control');area.classList.add('edge-segment-hit');area.setAttribute('d',`M${a.join(',')} L${b.join(',')}`);
-        control.classList.add('edge-bend');segment.style.cursor=a[1]===b[1]?'ns-resize':'ew-resize';Object.assign(control.dataset,{x:(a[0]+b[0])/2,y:(a[1]+b[1])/2});positionBend(control);
+        control.classList.add('edge-bend');segment.style.cursor=a[1]===b[1]?'ns-resize':'ew-resize';Object.assign(control.dataset,{x:(a[0]+b[0])/2,y:(a[1]+b[1])/2,horizontal:String(a[1]===b[1])});positionBend(control);
         const title=document.createElementNS('http://www.w3.org/2000/svg','title');title.textContent='拖动调整折线';segment.append(title,area,control);
-        segment.onpointerdown=event=>dragEdgeSegment(event,e.id,route.points,i);segment.onclick=event=>event.stopPropagation();segment.ondblclick=event=>editConnectionLabel(e.id,event);geometry.append(segment);
+        segment.onpointerdown=event=>dragEdgeSegment(event,e.id,route.points,i);segment.onclick=event=>event.stopPropagation();segment.ondblclick=event=>editConnectionLabel(e.id,event);segment.onpointermove=event=>forkHover.show?.(event);segment.onpointerleave=()=>forkHover.hide?.();geometry.append(segment);
       }
       const split=lineBranchSplit(route.points);
       if(split){const {point,side}=split,fork=document.createElementNS('http://www.w3.org/2000/svg','g');fork.classList.add('edge-fork-control');fork.setAttribute('role','button');fork.setAttribute('tabindex','0');fork.setAttribute('aria-label','拖到目标页面新增分支，也可点击后选择目标');
         const title=document.createElementNS('http://www.w3.org/2000/svg','title');title.textContent='拖到目标页面新增分支；也可点击后选目标，Esc 取消';fork.append(title);
         for(const className of ['edge-fork-stem','edge-fork-hit','edge-fork','edge-fork-plus']){const handle=document.createElementNS('http://www.w3.org/2000/svg',['edge-fork-plus','edge-fork-stem'].includes(className)?'path':'circle');handle.classList.add(className);Object.assign(handle.dataset,{x:point[0],y:point[1],side});positionFork(handle);fork.append(handle);}
-        const begin=event=>{const fixed={id:'draft-fork',kind:'note',presentation:'branch',x:point[0]-8,y:point[1]-8};dragConnection(event,fixed,side,null,'to',{edgeId:e.id,point,route:{points:route.points,edgeIds:edges.map(edge=>edge.id),from:from.id,fromSide,toSide,module:moduleId,labelPosition:placement?[placement.box.x,placement.box.y]:undefined}});};
+        const current={point,side};
+        const begin=event=>{const {point,side}=current,fixed={id:'draft-fork',kind:'note',presentation:'branch',x:point[0]-8,y:point[1]-8};fork.classList.add('active');dragConnection(event,fixed,side,null,'to',{edgeId:e.id,point,route:{points:route.points,edgeIds:edges.map(edge=>edge.id),from:from.id,fromSide,toSide,module:moduleId,labelPosition:placement?[placement.box.x,placement.box.y]:undefined}});};
+        forkHover.show=event=>{const near=lineBranchSplit(route.points,canvasPoint(event));if(!near)return;clearTimeout(fork.hideTimer);current.point=near.point;current.side=near.side;for(const handle of fork.querySelectorAll('.edge-fork-stem,.edge-fork-hit,.edge-fork,.edge-fork-plus')){Object.assign(handle.dataset,{x:near.point[0],y:near.point[1],side:near.side});positionFork(handle);}fork.classList.add('active');};
+        forkHover.hide=()=>{clearTimeout(fork.hideTimer);fork.hideTimer=setTimeout(()=>fork.classList.remove('active'),400);};
+        const leaveLine=hit.onpointerleave;hit.onpointerleave=path.onpointerleave=event=>{leaveLine?.(event);forkHover.hide();};fork.onpointerenter=()=>clearTimeout(fork.hideTimer);fork.onpointerleave=()=>forkHover.hide();
         fork.onpointerdown=begin;fork.onclick=event=>event.stopPropagation();fork.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();begin(event);}};geometry.append(fork);
       }controlsLayer.append(geometry);
       for(const endpoint of ['from','to']){
@@ -383,52 +391,57 @@ function dragEdgeSegment(event,id,points,index){
   const axis=points[index][1]===points[index+1][1]?1:0;
   edgeGeometryGesture(event,id,(edge,p,start)=>{const display=overviewEdges(model).find(e=>e.id===id),waypoints=adjustConnectionSegment(activeCanvasNodes(),display,points,index,p[axis]-start[axis]);if(!waypoints)return false;edge.waypoints=waypoints;});
 }
+// 把手保持小而稳定：放大时保持屏幕大小，缩小时最多收到 60%，不会随画布缩小而显得巨大。
+function handleUnit(){return Math.max(.6,Math.min(1,Math.sqrt(camera.scale)))/camera.scale;}
 function positionArrow(marker){marker.setAttribute('markerWidth',8/camera.scale);marker.setAttribute('markerHeight',8/camera.scale);}
 function positionEndpoint(handle){
-  const vector={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]}[handle.dataset.side],offset=(handle.dataset.branch==='true'?20:-7)/camera.scale,x=Number(handle.dataset.x)+vector[0]*offset,y=Number(handle.dataset.y)+vector[1]*offset;
-  for(const [selector,radius] of [['.edge-endpoint-hit',12],['.edge-endpoint',4]]){const circle=handle.querySelector(selector);circle.setAttribute('cx',x);circle.setAttribute('cy',y);circle.setAttribute('r',radius/camera.scale);}
+  const vector={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]}[handle.dataset.side],offset=(handle.dataset.branch==='true'?12:-7)*handleUnit(),x=Number(handle.dataset.x)+vector[0]*offset,y=Number(handle.dataset.y)+vector[1]*offset;
+  for(const [selector,radius] of [['.edge-endpoint-hit',14],['.edge-endpoint',5]]){const circle=handle.querySelector(selector);circle.setAttribute('cx',x);circle.setAttribute('cy',y);circle.setAttribute('r',radius*handleUnit());}
 }
 function positionFork(handle){
-  const px=Number(handle.dataset.x),py=Number(handle.dataset.y),unit=1/camera.scale,horizontal=['left','right'].includes(handle.dataset.side),x=px+(horizontal?0:28*unit),y=py-(horizontal?28*unit:0);
+  const px=Number(handle.dataset.x),py=Number(handle.dataset.y),unit=handleUnit(),horizontal=['left','right'].includes(handle.dataset.side),x=px+(horizontal?0:28*unit),y=py-(horizontal?28*unit:0);
   if(handle.classList.contains('edge-fork-stem')){handle.setAttribute('d',`M${px},${py} L${x},${y}`);return;}
   if(handle.classList.contains('edge-fork-plus')){handle.setAttribute('d',`M${x-4*unit},${y} H${x+4*unit} M${x},${y-4*unit} V${y+4*unit}`);return;}
   handle.setAttribute('cx',x);handle.setAttribute('cy',y);handle.setAttribute('r',(handle.classList.contains('edge-fork-hit')?14:9)*unit);
 }
-function positionBend(handle){const size=8/camera.scale;handle.setAttribute('x',Number(handle.dataset.x)-size/2);handle.setAttribute('y',Number(handle.dataset.y)-size/2);handle.setAttribute('width',size);handle.setAttribute('height',size);}
+function positionBend(handle){const long=18*handleUnit(),short=6*handleUnit(),horizontal=handle.dataset.horizontal==='true',width=horizontal?long:short,height=horizontal?short:long;handle.setAttribute('x',Number(handle.dataset.x)-width/2);handle.setAttribute('y',Number(handle.dataset.y)-height/2);handle.setAttribute('width',width);handle.setAttribute('height',height);handle.setAttribute('rx',3*handleUnit());}
 function canvasPoint(event){const r=$('#canvas-viewport').getBoundingClientRect();return [(event.clientX-r.left-camera.x)/camera.scale,(event.clientY-r.top-camera.y)/camera.scale];}
 function dragConnection(event,fixed,fixedSide,edge=null,endpoint='to',fork=null){
   if(spacePressed||readonly||event.button!==undefined&&event.button!==0)return;
   event.preventDefault();event.stopPropagation();closeMenus();cancelConnection?.();activeCanvasGesture?.();
   const svg=$('#lines'),preview=document.createElementNS('http://www.w3.org/2000/svg','path');preview.classList.add('connection-preview');preview.setAttribute('marker-end','url(#arrow-active)');svg.append(preview);$('#canvas-world').classList.add('connecting');
-  const pointerId=event.pointerId,start=Number.isFinite(event.clientX)?[event.clientX,event.clientY]:null;let dragged=false,destination=null,candidate=null,frame=null,lastEvent=null;
+  const pointerId=event.pointerId,start=Number.isFinite(event.clientX)?[event.clientX,event.clientY]:null;let dragged=false,destination=null,candidate=null,frame=null,lastEvent=null,looseSide=null;
   const accepts=e=>pointerId===undefined||e.pointerId===undefined||e.pointerId===pointerId;
   const paint=e=>{
     if(!accepts(e))return;
     if(start&&Math.hypot(e.clientX-start[0],e.clientY-start[1])>4)dragged=true;
     const ns=activeCanvasNodes(),point=canvasPoint(e),el=document.elementFromPoint(e.clientX,e.clientY),card=el?.closest('.node'),port=el?.closest('.node-port');
-    const target=connectionTarget(ns,point,{exclude:[fixed.id],tolerance:24/camera.scale,side:port&&card?port.dataset.side:null});
+    const target=connectionTarget(ns,point,{exclude:[fixed.id],tolerance:32/camera.scale,side:port&&card?port.dataset.side:null,toward:fixed});
     destination=target?.node||null;
     document.querySelectorAll('.node.connection-target').forEach(n=>{n.classList.remove('connection-target');delete n.dataset.connectionSide;});
     if(target){const card=document.querySelector(`.node[data-id="${target.node.id}"]`);if(card){card.classList.add('connection-target');card.dataset.connectionSide=target.side;}}
     const loose={id:'draft-pointer',kind:'note',presentation:'branch',x:point[0]-8,y:point[1]-8};
-    const targetSide=target?.side||connectionDirections({},fixed,loose)[1];candidate=previewConnection(ns,fixed,fixedSide,target?.node||loose,targetSide,{endpoint,branch:!!fork});
-    preview.setAttribute('d',connectionDisplayPath(candidate?.route.points||[],8,ns));preview.classList.toggle('blocked',!!candidate?.route.blocked);
+    looseSide=target?null:looseConnectionSide(fixed,point,looseSide);const targetSide=target?.side||looseSide;candidate=previewConnection(ns,fixed,fixedSide,target?.node||loose,targetSide,{endpoint,branch:!!fork});
+    preview.setAttribute('d',connectionDisplayPath((candidate?.route.blocked?candidate.route.overlay:candidate?.route.points)||[],8,ns));preview.classList.toggle('blocked',!!candidate?.route.blocked);
   };
   const move=e=>{if(!accepts(e))return;if(start&&Math.hypot(e.clientX-start[0],e.clientY-start[1])>4)dragged=true;lastEvent=e;if(frame===null)frame=requestAnimationFrame(()=>{frame=null;paint(lastEvent);});};
   const cleanup=()=>{if(frame!==null)cancelAnimationFrame(frame);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',release);document.removeEventListener('pointerdown',pick,true);document.removeEventListener('pointercancel',cancel);preview.remove();document.querySelectorAll('.edge-endpoint-control.active').forEach(handle=>handle.classList.remove('active'));$('#canvas-world').classList.remove('connecting');document.querySelectorAll('.connection-target').forEach(n=>{n.classList.remove('connection-target');delete n.dataset.connectionSide;});cancelConnection=null;};
   const cancel=e=>{if(e&&!accepts(e))return;cleanup();drawLines();};
   const finish=e=>{
-    if(!accepts(e))return;paint(e);const chosen=destination,line=candidate;cleanup();
-    if(!chosen||!line||line.route.blocked||!e.target.closest('#canvas-viewport')){drawLines();return;}
+    if(!accepts(e))return;paint(e);const chosen=destination,line=candidate,inCanvas=!!e.target.closest('#canvas-viewport'),intended=dragged||!!fork;cleanup();
+    if(!inCanvas){drawLines();return;}
+    if(!chosen||!line){drawLines();if(intended)notice('请把线拖到页面的连接点上，未连接已取消。');return;}
+    if(line.route.blocked){drawLines();notice('这个方向被页面挡住，无法连线。请换一个连接点，或先调整页面位置。');return;}
     const duplicate=!edge&&!fork&&overviewEdges(model).find(v=>v.from===line.edge.from&&v.to===line.edge.to&&v.fromSide===line.fromSide&&v.toSide===line.toSide);
     if(duplicate){selected={type:'edge',id:duplicate.id};renderInspector();drawLines();return;}
     if(edge&&edge[endpoint]===chosen.id&&edge[endpoint+'Side']===(endpoint==='from'?line.fromSide:line.toSide)){drawLines();return;}
-    const next=clone(model);let changedId;
+    const next=clone(model),owner=edge&&model.edges.find(v=>v.id===edge.id),bound=endpoint==='from'&&!!(owner?.selector||owner?.rect);let changedId;
     if(fork){const result=createLineBranch(next,fork.edgeId,chosen.id,fork.point,line.toSide,{...fork.route,branchSide:line.fromSide});changedId=result?.edgeId;}
     else if(edge){if(reconnectEdge(next,edge.id,endpoint,chosen.id,endpoint==='from'?line.fromSide:line.toSide,fixedSide))changedId=edge.id;}
     else changedId=connectNodes(next,line.edge.from,line.edge.to,line.fromSide,line.toSide);
     if(!changedId){drawLines();return;}
     edit(()=>{model=next;selected={type:'edge',id:changedId};});$('#canvas-viewport').focus({preventScroll:true});
+    if(bound){const after=model.edges.find(v=>v.id===changedId);if(after&&!after.selector&&!after.rect)notice('已改接来源，原来的按钮或热点绑定已清除；可撤销，或在右侧重新绑定。');}
   };
   const release=e=>{if(!accepts(e))return;if(fork&&start&&!dragged&&Math.hypot(e.clientX-start[0],e.clientY-start[1])<=4)return;finish(e);};
   const pick=e=>{if(e.button!==0||!accepts(e))return;e.preventDefault();e.stopImmediatePropagation();finish(e);};

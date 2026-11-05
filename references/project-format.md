@@ -133,7 +133,7 @@ node "<Skill目录>/scripts/yuanxing.mjs" export --root "<项目目录>" --view 
 - Agent 修改已有 `artifact/workbench.json` 时，先在临时目录保存修改前的原始 JSON 字节和修改后 JSON，再执行以下命令。基线必须来自本次实际读取，不能用改完后的文件充当基线。完成后清理本轮临时文件；冲突时保留输入，读取命令返回的双方内容处理，禁止直接整份覆盖。
 
 ```sh
-node scripts/yuanxing.mjs apply --root <项目目录> --base <修改前JSON> --model <修改后JSON>
+node "<Skill目录>/scripts/yuanxing.mjs" apply --root "<项目目录>" --base "<修改前JSON>" --model "<修改后JSON>"
 ```
 
 - `serve` 启动带监视的子进程，后端依赖变动时优雅重启，保持令牌并只首次打开浏览器。前端轮询工作台及扩展代码版本，连续两次探测稳定的新版本后，等待编辑、保存、上传、弹窗和原型体验结束再自动重载并恢复位置；离线导出不轮询。
@@ -159,8 +159,8 @@ Agent 使用 `workspace add --workspace <文件> --root <项目> --id <标识>` 
 通用工作台只维护 `runtime/` 一份实现。项目自己的页面、数据和专用交互放在项目目录，通过启动参数加载扩展；不复制或修改另一份工作台内核。普通项目无需扩展。
 
 ```sh
-node scripts/yuanxing.mjs serve --root ./my-project --extension ./my-project/extension --open
-node scripts/yuanxing.mjs export --root ./my-project --extension ./my-project/extension --view review
+node "<Skill目录>/scripts/yuanxing.mjs" serve --root ./my-project --extension ./my-project/extension --open
+node "<Skill目录>/scripts/yuanxing.mjs" export --root ./my-project --extension ./my-project/extension --view review
 ```
 
 扩展目录用 `extension.json` 列出依赖与入口，顺序为依赖在前、入口最后：
