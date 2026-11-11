@@ -90,6 +90,19 @@ test('引用正文与图片变化更新版本，离线及基础交付保留所�
   const beforeImage=(await store.status()).sourceVersion;await fs.appendFile(image,Buffer.from([0]));assert.notEqual((await store.status()).sourceVersion,beforeImage);
 });
 
+test('相对图片路径在加载、修改标题和离线导出后仍对应同一 HTML 图及外框比例',async t=>{
+  const {root,model}=await project(t),relative='artifact/assets/flow.png';
+  await fs.writeFile(path.join(root,'需求.md'),'## 流程\n![流程]('+relative+')\n原有规则');
+  await fs.writeFile(path.join(root,relative),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nm9sAAAAASUVORK5CYII=','base64'));
+  const block={id:'prd',type:'source',path:'需求.md',section:'流程',imageFrames:{[relative]:{node:'detail',frameScale:.65}}};model.document={version:1,blocks:[block]};
+  await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));const store=await createStore(root),bundle=await store.load(),key=documentSourceKey(block),alias=Object.keys(bundle.documentImagePaths[key])[0];
+  assert.equal(bundle.documentImagePaths[key][alias],relative);assert(bundle.documentSources[key].includes('('+alias+')'));assert(bundle.resources.detail.includes('<input'));
+  const compatible=createCompatibilityBundle(bundle);assert.equal(compatible.yuanxing.documentImagePaths[key][alias],relative);assert.equal(compatible.yuanxing.document.blocks[0].imageFrames[relative].frameScale,.65);
+  const html=await standalone(bundle,{view:'document'}),payload=JSON.parse(html.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1]);assert.equal(payload.yuanxing.documentImagePaths[key][alias],relative);assert.equal(payload.yuanxing.document.blocks[0].imageFrames[relative].node,'detail');
+  const changed=await store.saveDocumentSource({id:block.id,key,version:bundle.documentSourceVersions[key],line:0,before:'流程',value:'处理流程'}),nextKey=changed.keyChanges[key];
+  assert.equal(changed.documentImagePaths[nextKey][alias],relative);assert.equal((await store.load()).documentImagePaths[nextKey][alias],relative);assert((await fs.readFile(path.join(root,'需求.md'),'utf8')).includes('('+relative+')'));
+});
+
 test('正文引用保护项目边界，失效章节阻止导出，单模块不携带其他模块专属正文',async t=>{
   const {root,model}=await project(t);model.document={version:1,blocks:[{id:'owned',type:'source',path:'需求.md',section:'分配',nodes:['list']},{id:'other-owned',type:'source',path:'需求.md',section:'其他',nodes:['other']}]};
   const subset=exportSubset(model,'main');assert(findDocumentBlock(subset,'owned'));assert(!findDocumentBlock(subset,'other-owned'));assert.deepEqual(validate(subset),[]);

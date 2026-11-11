@@ -78,7 +78,7 @@ export function offlineApp(source){
     ['if(!recycleOpen)camera=','camera='],
     ['!recycleOpen&&',''],
     ['&&!recycleOpen',''],
-    ['||recycleOpen','',7],
+    ['||recycleOpen','',4],
     ['recycleOpen=false;','',4]
   ]);
   return assertNoEditorCode(source,'app');

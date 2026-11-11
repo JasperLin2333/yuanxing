@@ -5,8 +5,8 @@ export function documentPrototypeLayout(node,availableWidth,rect,height,{maxWidt
   const contentWidth=rect?rect[2]+24:node.width,contentHeight=rect?rect[3]+24:node.height;
   const available=Math.max(80,availableWidth-2),baseWidth=Math.min(maxWidth,available);
   const baseHeight=Math.max(120,Math.min(maxHeight,height??(contentHeight*Math.min(1,baseWidth/contentWidth)+52)));
-  frameScale=Math.max(Math.max(.2,Math.min(240,baseWidth)/baseWidth,120/baseHeight),Math.min(2,available/baseWidth,frameScale));
-  const width=baseWidth*frameScale,viewHeight=baseHeight*frameScale;
+  frameScale=Math.max(Math.max(.2,Math.min(240,baseWidth)/baseWidth),Math.min(2,available/baseWidth,frameScale));
+  const width=baseWidth*frameScale,viewHeight=Math.max(120,baseHeight*frameScale);
   const scale=Math.min(1,Math.max(16,width-32)/contentWidth,Math.max(16,viewHeight-52)/contentHeight);
   return {scale,width,height:viewHeight,frameScale,contentWidth,contentHeight,left:rect?-rect[0]+12:0,top:rect?-rect[1]+12:0};
 }
@@ -18,7 +18,7 @@ export function constrainDocumentCamera(camera,layout){
 // 每个文档嵌入项拥有自己的播放上下文，翻页和输入不会改写文档或其他嵌入项。
 export function mountDocumentPrototype(host, initialNode, viewport, block) {
   let node=initialNode,context=initialNodeContext(host.model().contextDefaults,initialNode),frame,stage,focusRect,disposed=false,pageScale=1,layout,camera,fitted=true,tools,zoomLabel,hand=false,space=false,drag=null,unbindFrame;
-  let frameScale=block.frameScale??1,savedFrameScale=frameScale,frameDrag=null;
+  let frameScale=block.frameScale??1,savedFrameScale=frameScale,frameDrag=null,extension,playbackGeneration=0;
   const bridgeToken=globalThis.crypto.randomUUID();
   const paint=()=>{
     if(!stage||!layout)return;
@@ -67,10 +67,13 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
   };
   const control=(text,label,action)=>{const button=document.createElement('button');button.type='button';button.textContent=text;button.title=label;button.setAttribute('aria-label',label);button.onclick=action;tools.append(button);return button;};
   const mountControls=()=>{
-    tools=document.createElement('div');tools.className='doc-canvas-controls';tools.setAttribute('role','group');tools.setAttribute('aria-label','原型查看');
-    const pan=control('拖动','拖动画布（再次点击退出）',()=>{hand=!hand;pan.setAttribute('aria-pressed',String(hand));paint();});pan.setAttribute('aria-pressed',String(hand));
-    control('−','缩小',()=>zoom(1/1.25));zoomLabel=document.createElement('span');zoomLabel.className='doc-canvas-scale';tools.append(zoomLabel);
-    control('+','放大',()=>zoom(1.25));control('适应','适应画布',fit);viewport.append(tools);
+    tools=document.createElement('div');tools.className='doc-canvas-controls';tools.setAttribute('role','group');tools.setAttribute('aria-label','画布查看');
+    const icon=(label,path,action)=>{const button=control('',label,action);button.innerHTML=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;return button;};
+    const pan=icon('拖动画布（再次点击退出）','<path d="M8 12V5a2 2 0 0 1 4 0v5-6a2 2 0 0 1 4 0v7-4a2 2 0 0 1 4 0v8c0 4-2 6-6 6h-2c-3 0-4-1-6-4l-2-3a2 2 0 0 1 3-2l1 1"/>',()=>{hand=!hand;pan.setAttribute('aria-pressed',String(hand));paint();});pan.setAttribute('aria-pressed',String(hand));
+    icon('缩小','<path d="M5 12h14"/>',()=>zoom(1/1.25));zoomLabel=document.createElement('span');zoomLabel.className='doc-canvas-scale';tools.append(zoomLabel);
+    icon('放大','<path d="M5 12h14M12 5v14"/>',()=>zoom(1.25));
+    icon('适应画布','<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M3 3l6 6M21 3l-6 6M21 21l-6-6M3 21l6-6"/>',fit);
+    icon('刷新当前画布，恢复初始状态','<path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 12l-5-5"/>',reset);viewport.append(tools);
     const hint=document.createElement('span');hint.className='doc-canvas-hint';hint.textContent='空格拖动 · ⌘/Ctrl + 滚轮缩放';viewport.append(hint);
     const handle=document.createElement('button');handle.type='button';handle.className='doc-canvas-resize';handle.title='拖动等比调整画布外框大小';handle.setAttribute('aria-label',handle.title);
     handle.innerHTML='<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3 11 11 3M7 11l4-4M11 11h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
@@ -97,11 +100,24 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
   const blur=()=>{space=false;drag=null;finishFrameResize(true);paint();};
   window.addEventListener('keydown',key);window.addEventListener('keyup',key);window.addEventListener('blur',blur);
   const navigate=id=>{if(disposed)return;const target=host.model().nodes.find(n=>n.id===id&&n.kind!=='note');if(target){node=target;context=initialNodeContext(context,node);render();}};
-  // 扩展拥有长期绑定到本嵌入项的宿主；异步回调也不会跳到画布或其他预览。
-  const extension=host.createExtension?.({
-    getState:()=>({model:host.model(),n:node,current:node.id,frames:frame?{[node.id]:frame}:{},frame,pageScale,experience:true,mode:null}),
-    openNode:navigate,measure:resize,renderOverlays:resize,renderInspector:()=>{},exitExperience:()=>navigate(initialNode.id)
-  })??host.extension;
+  // 每轮演示独立创建扩展；刷新前的异步回调不能再操作新一轮画布。
+  function createExtension(){
+    const generation=++playbackGeneration,active=()=>!disposed&&generation===playbackGeneration;
+    return host.createExtension?.({
+      getState:()=>({model:host.model(),n:node,current:node.id,frames:active()&&frame?{[node.id]:frame}:{},frame:active()?frame:null,pageScale,experience:true,mode:null}),
+      openNode:id=>{if(active())navigate(id);},measure:()=>{if(active())resize();},renderOverlays:()=>{if(active())resize();},renderInspector:()=>{},exitExperience:()=>{if(active())navigate(initialNode.id);}
+    })??host.extension;
+  }
+  function reset(){
+    if(disposed)return;
+    finishFrameResize(true);drag=null;hand=false;space=false;
+    ++playbackGeneration;extension?.dispose?.();
+    node=host.model().nodes.find(n=>n.id===initialNode.id)??initialNode;
+    context=initialNodeContext(host.model().contextDefaults,node);
+    unbindFrame?.();unbindFrame=null;frame=null;
+    extension=createExtension();render();
+  }
+  extension=createExtension();
   const outgoing=()=>host.model().edges.filter(edge=>edge.from===node.id&&!edge.diagram);
   const scoped=fn=>host.scope?host.scope({n:node,current:node.id,frames:{[node.id]:frame},frame,pageScale,experience:true,model:host.model()},fn):fn();
   const follow=edges=>{const edge=eligibleEdges(edges,context)[0];if(!edge)return;if(scoped(()=>extension?.travel?.(edge)))return;context=nextContext(context,edge);navigate(edge.to);};
@@ -147,5 +163,5 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
   const refresh=()=>queueMicrotask(()=>{if(disposed)return;observer?.disconnect();observer?.observe(viewport.parentElement||viewport);resize();});
   render();
   refresh();
-  return {refresh,fit,zoom,updateBlock(next){block=next;const value=block.frameScale??1;if(value!==savedFrameScale){savedFrameScale=value;changeFrameScale(value);}},dispose(){finishFrameResize(true);disposed=true;unbindFrame?.();viewport.removeEventListener('pointermove',frameResizeMove);viewport.removeEventListener('pointerup',frameResizeEnd);viewport.removeEventListener('pointercancel',frameResizeEnd);viewport.removeEventListener('lostpointercapture',frameResizeEnd);viewport.removeEventListener('pointerdown',panDown,true);viewport.removeEventListener('pointermove',panMove);viewport.removeEventListener('pointerup',panEnd);viewport.removeEventListener('pointercancel',panEnd);viewport.removeEventListener('wheel',wheel);window.removeEventListener('keydown',key);window.removeEventListener('keyup',key);window.removeEventListener('blur',blur);observer?.disconnect();componentObserver?.disconnect();extension?.dispose?.();window.removeEventListener('message',message);window.removeEventListener('resize',resize);},isBusy(){if(frameDrag)return true;try{const doc=frame?.contentDocument;return document.activeElement===frame||!!doc?.activeElement?.matches('input,textarea,select,[contenteditable="true"]');}catch{return document.activeElement===frame;}}};
+  return {refresh,fit,zoom,updateBlock(next){block=next;const value=block.frameScale??1;if(value!==savedFrameScale){savedFrameScale=value;changeFrameScale(value);}},dispose(){if(disposed)return;finishFrameResize(true);disposed=true;++playbackGeneration;unbindFrame?.();viewport.removeEventListener('pointermove',frameResizeMove);viewport.removeEventListener('pointerup',frameResizeEnd);viewport.removeEventListener('pointercancel',frameResizeEnd);viewport.removeEventListener('lostpointercapture',frameResizeEnd);viewport.removeEventListener('pointerdown',panDown,true);viewport.removeEventListener('pointermove',panMove);viewport.removeEventListener('pointerup',panEnd);viewport.removeEventListener('pointercancel',panEnd);viewport.removeEventListener('wheel',wheel);window.removeEventListener('keydown',key);window.removeEventListener('keyup',key);window.removeEventListener('blur',blur);observer?.disconnect();componentObserver?.disconnect();extension?.dispose?.();window.removeEventListener('message',message);window.removeEventListener('resize',resize);},isBusy(){if(frameDrag)return true;try{const doc=frame?.contentDocument;return document.activeElement===frame||!!doc?.activeElement?.matches('input,textarea,select,[contenteditable="true"]');}catch{return document.activeElement===frame;}}};
 }

@@ -213,7 +213,6 @@ textarea{min-height:112px;resize:vertical}
 .dropdown-menu button span{font-weight:400}
 #export-options{right:0;top:calc(100% + 8px)}
 #export-options::before{content:"";position:absolute;top:-8px;left:0;right:0;height:8px}
-#canvas-add-menu{position:fixed;z-index:40}
 #node-image-menu{position:fixed;z-index:40}
 .node-header .node-image-actions{flex:none;min-height:28px;height:28px;margin-left:auto;padding:3px 8px;border-color:var(--border);color:var(--muted);font-size:12px;font-weight:400}
 .zoom-sensitivity-range{display:flex;justify-content:space-between;margin-top:4px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
@@ -393,11 +392,11 @@ blockquote.doc-text{border-left:3px solid #b6c8bc;margin:8px 0;padding:6px 16px;
 .doc-prototype-viewport{position:relative;max-width:100%;overflow:hidden;background:#f5f6f8;border:1px solid #e1e5eb;border-radius:6px;min-height:120px;margin:0 auto;isolation:isolate}
 .doc-prototype-stage{position:absolute;left:0;top:0;overflow:hidden;transform-origin:0 0;background:#fff}
 .doc-prototype-stage>iframe,.doc-prototype-stage>img{position:absolute;left:0;top:0;border:0;max-width:none}
-.doc-canvas-controls{position:absolute;right:28px;bottom:8px;z-index:5;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid #dfe4eb;border-radius:6px;background:#fff;box-shadow:0 2px 8px #1c2a4012}
-.doc-canvas-controls button{height:26px;min-height:0;min-width:28px;padding:2px 7px;border:0;border-radius:3px;background:transparent;color:#5c6675;font-size:13px}
+.doc-canvas-controls{position:absolute;max-width:calc(100% - 36px);right:28px;bottom:8px;z-index:5;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid #dfe4eb;border-radius:6px;background:#fff;box-shadow:0 2px 8px #1c2a4012}
+.doc-canvas-controls button{display:grid;place-items:center;width:28px;height:28px;min-height:0;min-width:28px;padding:5px;border:0;border-radius:3px;background:transparent;color:#5c6675;font-size:13px}
 .doc-canvas-controls button:hover,.doc-canvas-controls button[aria-pressed="true"]{background:#eaf2ff;color:#2366bd}
-.doc-canvas-scale{min-width:40px;text-align:center;color:#667085;font-size:11px;font-variant-numeric:tabular-nums}
-.doc-canvas-hint{position:absolute;left:10px;bottom:14px;z-index:4;max-width:calc(100% - 240px);overflow:hidden;white-space:nowrap;color:#87909e;font-size:10px;pointer-events:none}
+.doc-canvas-scale{min-width:32px;text-align:center;color:#667085;font-size:11px;font-variant-numeric:tabular-nums}
+.doc-canvas-hint{position:absolute;left:10px;bottom:14px;z-index:4;max-width:max(0px,calc(100% - 250px));overflow:hidden;white-space:nowrap;color:#87909e;font-size:10px;pointer-events:none}
 .doc-canvas-resize{position:absolute;right:0;bottom:0;z-index:6;display:grid;place-items:center;width:24px;height:24px;min-height:0;padding:0;color:#87909e;border:0;border-radius:4px 0 4px 0;background:transparent;cursor:nwse-resize;touch-action:none}
 .doc-canvas-resize:hover,.doc-canvas-resize:focus-visible{color:#2366bd;background:#eaf2ff}
 .doc-canvas-resizing{cursor:nwse-resize;user-select:none}.doc-canvas-resizing .doc-prototype-stage{pointer-events:none}
@@ -447,3 +446,13 @@ blockquote.doc-text{border-left:3px solid #b6c8bc;margin:8px 0;padding:6px 16px;
 
 @media(max-width:1050px){.yx-select-experience{max-width:140px}}
 @media(max-width:720px){.yx-select-experience{min-width:60px;max-width:95px;font-size:12px}.yx-select-zoom{width:68px;min-width:68px}}
+
+/* 离线文件通过本机启动器进入编辑工作台，三个视图共用顶栏入口。 */
+.workbench-launch{display:none;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:5px 10px;border:1px solid var(--border);border-radius:var(--radius);font:inherit;color:var(--ink);text-decoration:none;white-space:nowrap}
+.offline-share .workbench-launch{display:inline-flex}
+.workbench-launch:hover{background:var(--hover)}
+.workbench-launch:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+@media(max-width:720px){.workbench-launch{padding:4px 6px;font-size:12px}.workbench-launch svg{display:none}}
+
+.canvas-pin{position:absolute;z-index:4;display:grid;place-items:center;width:22px;height:22px;min-height:0;padding:0;border:1px solid white;border-radius:50%;background:#2F85F9;color:white;font-size:12px;line-height:1;transform:translate(-50%,-50%) scale(var(--port-scale,1));box-shadow:0 1px 5px #0005;cursor:pointer}
+.canvas-pin:hover,.canvas-pin:focus-visible{background:#1266d1;color:white;outline:2px solid white}

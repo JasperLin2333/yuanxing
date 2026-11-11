@@ -158,6 +158,7 @@ export function pruneDocument(model) {
     owner.blocks = owner.blocks.filter(block => (!block.nodes?.length||block.nodes.some(id=>nodes.has(id)))&&(!['prototype','description'].includes(block.type) || (block.rule ? typeof model.rules?.[block.rule]==='string' : block.edge ? edges.has(block.edge) : nodes.has(block.node))));
     for (const block of owner.blocks) {
       if(block.nodes)block.nodes=block.nodes.filter(id=>nodes.has(id));
+      if(block.imageFrames)for(const [path,frame] of Object.entries(block.imageFrames))if(!nodes.has(frame?.node))delete block.imageFrames[path];
       if (block.type === 'columns') block.columns.forEach(prune);
       if (block.type === 'table') block.rows.forEach(row => row.cells.forEach(prune));
     }
@@ -191,6 +192,13 @@ export function validateDocument(model) {
         if(typeof block.path!=='string'||! /^(?!\/|\w+:)[^\\\u0000-\u001f]+\.md$/i.test(block.path)||block.path.split('/').some(v=>!v||v==='.'||v==='..'))errors.push('需求正文路径不正确');
         if(block.section!==undefined&&(typeof block.section!=='string'||!block.section.trim()))errors.push('需求正文标题不正确');
         if(block.omitHeading!==undefined&&typeof block.omitHeading!=='boolean')errors.push('需求正文标题设置不正确');
+        if(block.imageFrames!==undefined){
+          if(!block.imageFrames||typeof block.imageFrames!=='object'||Array.isArray(block.imageFrames))errors.push('需求正文图片画布配置不正确');
+          else for(const [path,frame] of Object.entries(block.imageFrames)){
+            if(!/^(?!\/|\w+:)[^?#\\\u0000-\u001f]+\.(png|jpe?g|webp)$/i.test(path)||!frame||typeof frame!=='object'||!nodes.has(frame.node)||nodes.get(frame.node).kind==='note')errors.push('需求正文图片画布引用不正确');
+            if(frame?.frameScale!==undefined&&(!Number.isFinite(frame.frameScale)||frame.frameScale<.2||frame.frameScale>2))errors.push('需求正文图片画布外框比例不正确');
+          }
+        }
       } else if (block.type === 'image') {
         if (typeof block.path !== 'string' || !/^assets\/[^?#\\\u0000-\u001f]+\.(png|jpe?g|webp)$/i.test(block.path) || block.path.split('/').some(v => !v || v === '.' || v === '..')) errors.push('文档图片路径不正确');
       } else if (block.type === 'columns') {
@@ -268,6 +276,7 @@ export function createDocumentOutline({root,paper,nav,toolbar}) {
 export function createDocumentView(host) {
   const root=host.root,cache=new Map(),bindings=new Set(),drafts=new Map();
   let active=false,signature='',outline,sourceTimer,sourceFlight,readingPosition=null,restoreFrame=null;
+  let usedPreviews=new Set();
   let importantTool,importantRange,importantEditor;
   let outlineOpen=typeof matchMedia!=='function'||!matchMedia('(max-width:700px)').matches;
   const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
@@ -331,18 +340,46 @@ export function createDocumentView(host) {
   }
   function sourceBody(block){
     const body=el('div','doc-text markdown doc-source'),key=documentSourceKey(block);body.innerHTML=(host.sourceMarkdown||host.markdown)(host.bundle().documentSources?.[key]||'');
+    const occurrences=new Map();
+    for(const image of body.querySelectorAll('img[data-asset-path]')){
+      const alias=image.getAttribute('data-asset-path'),path=host.bundle().documentImagePaths?.[key]?.[alias]||alias,config=block.imageFrames?.[path],node=config&&host.model().nodes.find(node=>node.id===config.node),paragraph=image.parentElement;
+      if(!node||paragraph?.tagName!=='P'||paragraph.children.length!==1||paragraph.textContent.trim())continue;
+      const occurrence=occurrences.get(path)||0;occurrences.set(path,occurrence+1);
+      const id=JSON.stringify([block.id,path,occurrence]);paragraph.dataset.docImageFrame='true';paragraph.contentEditable='false';
+      paragraph.replaceChildren(prototypeViewport(id,node,config,value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id)?.imageFrames?.[path];if(target)target.frameScale=value;})));
+    }
     if(!host.readonly&&host.saveSource)for(const editor of body.querySelectorAll('[data-source-line]')){
+      if(editor.dataset.docImageFrame)continue;
       const binding={id:block.id,key,version:host.bundle().documentSourceVersions?.[key],line:Number(editor.dataset.sourceLine),column:editor.dataset.sourceColumn===undefined?undefined:Number(editor.dataset.sourceColumn),before:host.read(editor)};bindings.add(binding);
       editable(editor,()=>{drafts.set(binding,host.read(editor));clearTimeout(sourceTimer);sourceTimer=setTimeout(()=>flushSources().catch(reportSourceError),550);},{inline:true});
       editor.onblur=()=>{if(drafts.has(binding))flushSources().catch(reportSourceError);};
     }
     return body;
   }
+  function prototypeViewport(id,node,block,resizeFrame){
+    usedPreviews.add(id);
+    const key=JSON.stringify([node?.id,node?.width,node?.height,block.selector,block.height,host.bundle().sourcesSignature,host.bundle().resources?.[node?.id],host.model().edges.filter(edge=>edge.from===node?.id)]);
+    let cached=cache.get(id);
+    if(!cached||cached.key!==key){cached?.dispose?.();const viewport=el('div','doc-prototype-viewport');cached={key,viewport,...(node?host.mountPrototype(node,viewport,block,{resizeFrame:host.readonly?undefined:resizeFrame}):{})};cache.set(id,cached);}
+    cached.updateBlock?.(block);cached.refresh?.();return cached.viewport;
+  }
   function list(owner,containerId){const box=el('div','doc-block-list');box.dataset.docContainer=containerId;for(const block of owner.blocks)box.append(renderBlock(block));return box;}
   function rowGrid(owners,widths){const grid=el('div','doc-grid');grid.style.gridTemplateColumns=widths.map(width=>width+'fr').join(' ');for(const owner of owners){const cell=el('div','doc-cell');cell.append(list(owner,owner.id));grid.append(cell);}return grid;}
   function renderBlock(block){
     const article=el('section','doc-block doc-'+block.type);article.dataset.docBlock=block.id;
-    if(block.type==='text')article.append(textEditor(block.text,value=>fieldChanged(model=>findDocumentBlock(model,block.id).text=value),block.format));
+    if(block.type==='text'){
+      const editor=textEditor(block.text,value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id);if(target)target.text=value;}),block.format);
+      if(!host.readonly&&host.changeStructure)editor.onkeydown=event=>{
+        if(!['Backspace','Delete'].includes(event.key)||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
+        if((editor.textContent||'').replace(/[\s\u200b\ufeff]/g,'')||editor.querySelector('img,video,audio,iframe,svg,canvas,hr,[contenteditable="false"]'))return;
+        const adjacent=[article.previousElementSibling?.dataset.docBlock,article.nextElementSibling?.dataset.docBlock].filter(Boolean);
+        event.preventDefault();event.stopPropagation();
+        host.changeStructure(model=>removeDocumentBlock(model,block.id));
+        const blocks=[...root.querySelectorAll('[data-doc-block]')];
+        for(const id of adjacent){const next=blocks.find(item=>item.dataset.docBlock===id)?.querySelector('[contenteditable="true"]');if(next){next.focus({preventScroll:true});break;}}
+      };
+      article.append(editor);
+    }
     else if(block.type==='description'){
       if(block.rule)article.append(textEditor(host.model().rules[block.rule],value=>fieldChanged(model=>model.rules[block.rule]=value)));
       else{const target=block.edge?host.model().edges.find(edge=>edge.id===block.edge):host.model().nodes.find(node=>node.id===block.node);if(target)article.append(textEditor(host.explanation(target),value=>fieldChanged(model=>{const owner=block.edge?model.edges.find(edge=>edge.id===block.edge):model.nodes.find(node=>node.id===block.node);if(owner)host.writeExplanation(owner,value);})));}
@@ -350,10 +387,8 @@ export function createDocumentView(host) {
     else if(block.type==='image'){const image=el('img','doc-image');image.alt=block.alt||'';image.src=host.bundle().images?.[block.path]||'';article.append(image);}
     else if(block.type==='prototype'){
       const bar=el('div','doc-prototype-bar');bar.append(el('span','',block.title||titleOf(block)));article.append(bar);
-      const node=host.model().nodes.find(node=>node.id===block.node),key=JSON.stringify([block.node,block.selector,block.height,host.bundle().sourcesSignature,host.bundle().resources?.[block.node],host.model().edges.filter(edge=>edge.from===block.node)]);
-      let cached=cache.get(block.id);if(!cached||cached.key!==key){cached?.dispose?.();const viewport=el('div','doc-prototype-viewport');cached={key,viewport,...(node?host.mountPrototype(node,viewport,block,{resizeFrame:host.readonly?undefined:value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id);if(target)target.frameScale=value;})}):{})};cache.set(block.id,cached);}
-      cached.updateBlock?.(block);
-      article.append(cached.viewport);cached.refresh?.();
+      const node=host.model().nodes.find(node=>node.id===block.node);
+      article.append(prototypeViewport(block.id,node,block,value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id);if(target)target.frameScale=value;})));
     }else if(block.type==='columns')article.append(rowGrid(block.columns,block.columns.map(column=>column.width||100/block.columns.length)));
     else if(block.type==='table'){const table=el('div','doc-table-grid');table.setAttribute('role','table');for(const row of block.rows){const line=rowGrid(row.cells,block.widths||row.cells.map(()=>100/row.cells.length));line.setAttribute('role','row');table.append(line);}article.append(table);}
     return article;
@@ -363,12 +398,13 @@ export function createDocumentView(host) {
     const model=host.model(),doc=model.document||defaultDocument(model),next=JSON.stringify([doc,model.nodes.map(node=>[node.id,node.title,node.description,node.rule]),model.rules,model.edges,host.bundle().sourcesSignature,host.bundle().documentSourceVersions]);
     if(signature===next)return;signature=next;
     readingPosition=outline?.capture()||readingPosition;
-    const scroll=root.scrollTop,outlineScroll=root.querySelector('.doc-outline-list')?.scrollTop||0,used=new Set();walkDocument(doc.blocks,block=>used.add(block.id));for(const [id,entry] of cache)if(!used.has(id)){entry.dispose?.();cache.delete(id);}
+    const scroll=root.scrollTop,outlineScroll=root.querySelector('.doc-outline-list')?.scrollTop||0;usedPreviews=new Set();
     hideImportantTool();outline?.dispose();bindings.clear();root.replaceChildren();
     const sidebar=el('aside','doc-outline'),nav=el('nav','doc-outline-list');sidebar.id='yuanxing-document-outline';sidebar.setAttribute('aria-label','需求文档目录');nav.setAttribute('aria-label','章节定位');sidebar.append(el('div','doc-outline-title','目录'),nav);sidebar.hidden=!outlineOpen;root.classList.toggle('doc-outline-collapsed',!outlineOpen);
     const main=el('div','doc-main'),paper=el('article','doc-paper'),heading=el('h1','doc-title',doc.title||model.title);
     editable(heading,()=>fieldChanged(model=>model.document.title=heading.textContent),{inline:true});
     paper.append(heading,list(doc,'@document'));main.append(paper);root.append(sidebar,main);root.scrollTop=scroll;
+    for(const [id,entry] of cache)if(!usedPreviews.has(id)){entry.dispose?.();cache.delete(id);}
     outline=createDocumentOutline({root,paper,nav});outline.update();nav.scrollTop=outlineScroll;
     if(readingPosition){const position=readingPosition;if(restoreFrame!==null)cancelAnimationFrame(restoreFrame);restoreFrame=requestAnimationFrame(()=>{restoreFrame=null;if(active)outline?.restore(position);});}
   }

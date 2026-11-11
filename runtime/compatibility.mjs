@@ -133,7 +133,7 @@ export function createCompatibilityBundle(bundle) {
     if(documentText.general.length)requirement.logic.push({id:'L'+(requirement.logic.length+1),text:documentText.general.join('\n\n')});
     manifest.requirements.push(requirement);
   }
-  return {manifest,files,yuanxing:{version:1,model,document:model.document||defaultDocument(model),documentSources:bundle.documentSources||{},images:bundle.images||{},bindings,limitations}};
+  return {manifest,files,yuanxing:{version:1,model,document:model.document||defaultDocument(model),documentSources:bundle.documentSources||{},documentImagePaths:bundle.documentImagePaths||{},images:bundle.images||{},bindings,limitations}};
 }
 
 export function compatibilityDataTag(bundle,payload=createCompatibilityBundle(bundle)) {

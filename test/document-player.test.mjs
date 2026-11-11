@@ -12,7 +12,7 @@ function environment(t){
   const element=tag=>({...emitter(),
     classList:{toggle(){}},closest(){return null;},matches(){return false;},getBoundingClientRect(){return {left:0,top:0};},setPointerCapture(){},tagName:tag.toUpperCase(),style:{},dataset:{},children:[],attrs:{},isConnected:true,clientWidth:1400,
     append(...children){for(const child of children){child.parentElement=this;this.children.push(child);}},
-    replaceChildren(){for(const child of this.children)child.isConnected=false;this.children=[];},
+    replaceChildren(...children){for(const child of this.children)child.isConnected=false;this.children=[];this.append(...children);},
     get firstElementChild(){return this.children[0];},
     setAttribute(key,value){this.attrs[key]=value;},querySelector(){return null;},querySelectorAll(){return [];},
     ...(tag==='iframe'?{contentWindow:{scrollX:0,scrollY:0},contentDocument:{}}:{})
@@ -29,6 +29,20 @@ function environment(t){
     message(event){for(const fn of listeners.get('message')||[])fn(event);},cleanup:fn=>cleanups.push(fn)};
 }
 const model=()=>({nodes:[{id:'one',title:'页面一',kind:'html',width:1280,height:800},{id:'two',title:'页面二',kind:'html',width:1280,height:800}],edges:[{id:'next',from:'one',to:'two',selector:'#next'}],contextDefaults:{role:'admin'}});
+
+test('删除空白文字块可撤销，不影响有内容或图片的块及输入法',t=>{
+  const env=environment(t),root=env.viewport(),m=model(),history=[];
+  m.document={version:1,blocks:[{id:'empty',type:'text',format:'heading1',text:''},{id:'keep',type:'text',text:'保留'}]};
+  let view;view=createDocumentView({root,model:()=>m,bundle:()=>({}),markdown:value=>value,read:node=>node.textContent||'',changeText:fn=>fn(m),changeStructure:fn=>{history.push(structuredClone(m.document));fn(m);view.render();}});
+  env.cleanup(()=>view.leave());view.enter();
+  const editor=()=>root.children[1].children[0].children[1].children[0].children[0];
+  const key=(extra={})=>{const event={key:'Backspace',preventDefault(){this.prevented=true;},stopPropagation(){this.stopped=true;},...extra};editor().onkeydown(event);return event;};
+  editor().textContent='文字';assert(!key().prevented);assert.equal(m.document.blocks.length,2);
+  editor().textContent='';assert(!key({isComposing:true}).prevented);
+  editor().querySelector=()=>({});assert(!key().prevented);editor().querySelector=()=>null;
+  editor().textContent=' \u200b';assert(key({key:'Delete'}).prevented);assert.deepEqual(m.document.blocks.map(b=>b.id),['keep']);
+  m.document=history.pop();view.render();assert.deepEqual(m.document.blocks.map(b=>b.id),['empty','keep']);
+});
 function frameOf(viewport){return viewport.firstElementChild.firstElementChild;}
 function loadFrame(frame){
   const listeners={};frame.contentDocument={addEventListener(name,fn){const previous=listeners[name];listeners[name]=previous?event=>{previous(event);fn(event);}:fn;},removeEventListener(){}};frame.onload();
@@ -112,6 +126,34 @@ test('查看区拖动和缩放不改变文档尺寸，普通滚轮保持默认�
   const last=stage.style.transform;mounted.dispose();viewport.dispatch('wheel',{ctrlKey:true,deltaY:-100});assert.equal(stage.style.transform,last);
 });
 
+test('宽扁流程图可缩小外框宽度，控制栏仍有最小操作高度',()=>{
+  const node={width:1510,height:150},full=documentPrototypeLayout(node,1400),small=documentPrototypeLayout(node,1400,null,undefined,{frameScale:.5});
+  assert.equal(small.width,full.width/2);assert(small.height>=120);assert(small.scale*node.width<=small.width-32+1e-9);assert(small.scale*node.height<=small.height-52+1e-9);
+});
+
+test('PRD 图片原位置使用共享查看器，保存外框不改写正文且缓存独立复用',t=>{
+  const env=environment(t),create=document.createElement,paragraphs=[];
+  document.createElement=tag=>{
+    const element=create(tag);
+    Object.defineProperty(element,'innerHTML',{set(value){
+      if(value!=='source-fixture')return;
+      const picture=create('p'),image=create('img'),text=create('p');picture.dataset.sourceLine='0';text.dataset.sourceLine='1';picture.textContent='';text.textContent='业务规则';
+      image.getAttribute=key=>key==='data-asset-path'?'assets/source-flow.png':null;picture.append(image);element.append(picture,text);
+      element.querySelectorAll=selector=>selector==='img[data-asset-path]'?[image]:selector==='[data-source-line]'?[picture,text]:[];paragraphs.push({picture,text,image});
+    }});return element;
+  };
+  const m=model(),path='../artifact/assets/flow.png';m.document={version:1,blocks:[{id:'prd',type:'source',path:'需求.md',imageFrames:{[path]:{node:'one',frameScale:.8}}}]};
+  let mounts=0,saves=0,sourceWrites=0,viewport,disposals=0;
+  const bundle={resources:{one:'<svg viewBox="0 0 1280 800"></svg>'},documentImagePaths:{'["需求.md","",false]':{'assets/source-flow.png':path}}};
+  const view=createDocumentView({root:env.viewport(),model:()=>m,bundle:()=>bundle,sourceMarkdown:()=> 'source-fixture',read:node=>node.textContent,changeText:fn=>{fn(m);saves++;},saveSource:()=>{sourceWrites++;},mountPrototype(node,target,block,options){mounts++;viewport=target;const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>bundle,...options},node,target,block);return {...mounted,dispose(){disposals++;mounted.dispose();}};}});
+  env.cleanup(()=>view.leave());view.enter();
+  assert.equal(paragraphs[0].picture.contentEditable,'false');assert.equal(paragraphs[0].text.contentEditable,'true');assert.equal(paragraphs[0].picture.children[0],viewport);
+  const frame=frameOf(viewport);resizeHandle(viewport).onkeydown({key:'ArrowLeft',preventDefault(){},stopPropagation(){}});
+  assert(Math.abs(m.document.blocks[0].imageFrames[path].frameScale-.75)<1e-9);assert.equal(saves,1);assert.equal(sourceWrites,0);
+  view.render();assert.equal(mounts,1);assert.equal(frameOf(viewport),frame);assert.equal(paragraphs[1].picture.children[0],viewport);
+  m.document.blocks[0].imageFrames={};view.render();assert.equal(disposals,1);assert.equal(paragraphs.at(-1).picture.children[0],paragraphs.at(-1).image);
+});
+
 const resizeHandle=viewport=>viewport.children.find(child=>child.className==='doc-canvas-resize');
 function startResize(viewport,id=9){resizeHandle(viewport).onpointerdown({button:0,pointerId:id,clientX:800,clientY:600,preventDefault(){},stopPropagation(){}});}
 
@@ -182,4 +224,52 @@ test('声明式扩展读取节点合并后的初始上下文副本',t=>{
   m.contextDefaults={customer:'原始客户'};m.nodes[0].initialContext={dialog:'open'};
   const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:'<p>页面</p>'}}),createExtension:()=>({declarative:true,mount(doc,node,options){mountedOptions.push(options);options.context.customer='扩展内部修改';}})},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());
   loadFrame(frameOf(viewport));assert.equal(mountedOptions[0].surface,'document');assert.equal(mountedOptions[0].interactive,true);assert.equal(mountedOptions[0].context.dialog,'open');assert.equal(m.contextDefaults.customer,'原始客户');
+});
+
+
+const refreshCanvas=viewport=>viewport.children.find(child=>child.className==='doc-canvas-controls').children.find(child=>child.attrs?.['aria-label']==='刷新当前画布，恢复初始状态').onclick();
+
+test('工具栏局部刷新恢复节点初值与适应，保留外框、文档和其他嵌入项',t=>{
+  const env=environment(t),first=env.viewport(),second=env.viewport(),m=model();
+  m.nodes[0].initialContext={customer:'初始客户',dialog:'open'};m.nodes[1].initialContext={dialog:'closed'};
+  const before=JSON.stringify(m),host={model:()=>m,bundle:()=>({resources:{one:'<input>',two:'<input>'}})};
+  const a=mountDocumentPrototype(host,m.nodes[0],first,{frameScale:.5}),b=mountDocumentPrototype(host,m.nodes[0],second,{});env.cleanup(()=>{a.dispose();b.dispose();});
+  const original=frameOf(first),other=frameOf(second),size=[first.style.width,first.style.height],transform=first.firstElementChild.style.transform;
+  const token=original.srcdoc.match(/"token":"([^"]+)"/)[1];other.contentDocument.draft='其他画布输入';first.parentElement.scrollTop=321;
+  env.message({source:original.contentWindow,data:{yuanxing:token,type:'follow',ids:['next'],context:{customer:'已输入客户',temporary:'本轮数据'}}});
+  const next=frameOf(first);assert(next.srcdoc.includes('已输入客户'));a.zoom(2);refreshCanvas(first);
+  const reset=frameOf(first);assert.notEqual(reset,original);assert.notEqual(reset,next);assert(reset.srcdoc.includes('初始客户'));assert(reset.srcdoc.includes('"dialog":"open"'));assert(!reset.srcdoc.includes('本轮数据'));
+  assert.equal(first.firstElementChild.style.transform,transform);assert.deepEqual([first.style.width,first.style.height],size);assert.equal(first.parentElement.scrollTop,321);
+  assert.equal(frameOf(second),other);assert.equal(other.contentDocument.draft,'其他画布输入');assert.equal(JSON.stringify(m),before);
+  next.onload();env.message({source:next.contentWindow,data:{yuanxing:token,type:'follow',ids:['next']}});assert.equal(frameOf(first),reset);
+  refreshCanvas(first);assert.notEqual(frameOf(first),reset,'可重复刷新');
+});
+
+test('刷新重建声明式扩展，丢弃临时状态并隔离旧异步回调',async t=>{
+  const env=environment(t),viewport=env.viewport(),m=model(),sessions=[];
+  const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:'<input>',two:'<p>结果</p>'}}),createExtension:api=>{
+    const session={api,temporary:'初始',disposed:0};sessions.push(session);return {declarative:true,dispose(){session.disposed++;}};
+  }},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());
+  sessions[0].temporary='修改';sessions[0].api.openNode('two');refreshCanvas(viewport);
+  assert.equal(sessions.length,2);assert.equal(sessions[0].disposed,1);assert.equal(sessions[1].temporary,'初始');assert.equal(sessions[1].api.getState().current,'one');
+  const frame=frameOf(viewport);await Promise.resolve();sessions[0].api.openNode('two');sessions[0].api.exitExperience();sessions[0].api.measure();assert.equal(frameOf(viewport),frame);assert.equal(sessions[0].api.getState().frame,null);
+  sessions[1].api.openNode('two');assert.notEqual(frameOf(viewport),frame,'新一轮仍可正常交互');
+  mounted.dispose();assert.equal(sessions[1].disposed,1);
+});
+
+test('截图热点跳转后局部刷新返回原截图及热点',t=>{
+  const env=environment(t),viewport=env.viewport(),m=model();m.nodes[0].kind='image';m.edges[0].rect=[.1,.1,.2,.2];
+  const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:'page.png',two:'<input>'}})},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());
+  viewport.firstElementChild.children[1].onclick();assert.equal(frameOf(viewport).tagName,'IFRAME');refreshCanvas(viewport);
+  assert.equal(frameOf(viewport).tagName,'IMG');assert.equal(frameOf(viewport).src,'page.png');assert.equal(viewport.firstElementChild.children[1].attrs['aria-label'],'继续');
+});
+
+
+test('嵌入画布工具以图标按拖动、缩放、适应和刷新排列',t=>{
+  const env=environment(t),viewport=env.viewport(),m=model();
+  const mounted=mountDocumentPrototype({model:()=>m,bundle:()=>({resources:{one:'<main></main>'}})},m.nodes[0],viewport,{});env.cleanup(()=>mounted.dispose());
+  const controls=viewport.children.find(child=>child.className==='doc-canvas-controls').children;
+  assert.deepEqual(controls.map(item=>item.attrs?.['aria-label']||'缩放比例'),['拖动画布（再次点击退出）','缩小','缩放比例','放大','适应画布','刷新当前画布，恢复初始状态']);
+  for(const button of controls.filter(item=>item.tagName==='BUTTON'))assert.match(button.innerHTML,/<svg/);
+  controls[0].onclick();assert.equal(controls[0].attrs['aria-pressed'],'true');
 });

@@ -15,6 +15,8 @@ node scripts/yuanxing.mjs connect --root <目录> --from <页面> --to <页面> 
 node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项目目录> --id <项目标识> [--name 名称]
 node scripts/yuanxing.mjs workspace list --workspace <工作区.json>
 node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] [--open]
+node scripts/yuanxing.mjs open [--root <项目目录> | --workspace <工作区.json>] [--project 标识] [--port 4318] [--reuse | --no-browser]
+node scripts/yuanxing.mjs desktop [--root <项目目录> | --workspace <工作区.json>]
 node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
 node scripts/yuanxing.mjs updates add --root <目录> --text <变更说明> [--date YYYY-MM-DD] [--node 页面标识] [--label 跳转名称] [--id 标识]
 node scripts/yuanxing.mjs updates list --root <目录> [--json]
@@ -25,14 +27,15 @@ node scripts/yuanxing.mjs export --root <目录> --view review|prototype|documen
 
 --rect 使用 0～1 的相对坐标。只表达画布关系时使用 --diagram。
 HTML 支持本地 CSS、图片和普通 JavaScript；外部服务与工程模块需先适配。
-serve / export / check 可加 --extension <扩展目录>、--builder <项目内Python脚本>、--validator <项目内校验脚本>。
+serve / open / desktop / export / check 可加 --extension <扩展目录>、--builder <项目内Python脚本>、--validator <项目内校验脚本>。
+设计迭代用 open --reuse：仅新启动服务时开页，已有工作台只复用；手动重新打开用 open，不带 --reuse。
 `;
 
 function options(args){
   const result={_:[]};
   for(let i=0;i<args.length;i++){
     const value=args[i];if(!value.startsWith('--')){result._.push(value);continue;}
-    const key=value.slice(2);if(['open','replace','diagram','json'].includes(key))result[key]=true;
+    const key=value.slice(2);if(['open','replace','diagram','json','reuse','no-browser'].includes(key))result[key]=true;
     else{if(!args[i+1]||args[i+1].startsWith('--'))throw new Error(`缺少 --${key} 的值`);result[key]=args[++i];}
   }return result;
 }
@@ -50,6 +53,16 @@ export async function run(args,{sessionToken}={}){
   const [command,...rest]=args;
   if(!command||['help','--help','-h'].includes(command)){console.log(help);return;}
   const flags=options(rest);
+  if(command==='open'||command==='desktop'){
+    const {configureLauncher,openWorkbench}=await import('../runtime/launcher.mjs');
+    const target=await configureLauncher(flags);
+    if(command==='desktop'){
+      const {installDesktop}=await import('../runtime/desktop.mjs');
+      const result=await installDesktop();console.log('已创建桌面入口：'+result.desktop);if(result.backup)console.log('原入口已备份：'+result.backup);console.log('启动链接：'+result.protocol);return result;
+    }
+    const result=await openWorkbench(target,{browser:flags['no-browser']?false:flags.reuse?'once':true,project:flags.project});
+    console.log(`${result.reused?'已复用':'已启动'}元形工作台：${result.url}`);console.log('可直接拖动页面、编辑说明、粘贴图片，也可以继续让 AI 修改。');return result;
+  }
   if(command==='locate'){
     const {locateProject,formatLocateResult}=await import('../runtime/locate.mjs');
     const result=await locateProject(path.resolve(required(flags,'root')),{query:flags.query,module:flags.module,limit:flags.limit===undefined?6:Number(flags.limit)});

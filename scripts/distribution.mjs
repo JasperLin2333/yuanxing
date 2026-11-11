@@ -37,7 +37,7 @@ export async function copySkill(source,destination,{target='generic'}={}){
     if(market&&(relative.endsWith('.md')||relative==='runtime/server.mjs'))data=Buffer.from(references(data.toString()));
     await fs.writeFile(file,data,{flag:'wx'});
   }
-  for(const item of ['SKILL.md','LICENSE','THIRD_PARTY_NOTICES.md','agents','references','runtime','scripts/yuanxing.mjs','scripts/install.mjs','scripts/distribution.mjs'])await copy(item);
+  for(const item of ['SKILL.md','LICENSE','THIRD_PARTY_NOTICES.md','agents','references','runtime','scripts/yuanxing.mjs','scripts/install.mjs','scripts/distribution.mjs','scripts/flowchart.mjs'])await copy(item);
   const exampleRoot=path.join(source,'examples/product-iteration'),packed=path.join(source,'assets/iteration.json');
   let example;
   if(await exists(exampleRoot)){

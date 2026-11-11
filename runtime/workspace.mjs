@@ -4,6 +4,7 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
 import {createStore,createHandler,gracefulShutdown} from './server.mjs';
+import {launchIdentity} from './launcher.mjs';
 
 const validId=id=>typeof id==='string'&&/^[a-zA-Z][\w-]*$/.test(id);
 export async function readWorkspace(file){
@@ -51,13 +52,17 @@ export function createWorkspaceHandler(file,token,{project}={}){
       if(!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host||''))return send(403,{error:'仅允许本机访问'});
       const config=await readWorkspace(file),url=new URL(req.url,'http://localhost');
       const projects=config.projects.map(({id,title})=>({id,title:title||id,url:`/p/${id}/`}));
+      const identity=launchIdentity({workspace:file}),cookieName='yuanxing-last-'+identity.slice(0,12);
+      if(req.method==='GET'&&url.pathname==='/api/launcher')return send(200,{app:'yuanxing',identity,projects});
       if(req.method==='GET'&&url.pathname==='/api/projects')return send(200,{projects});
       if(req.method==='GET'&&url.pathname==='/'){
-        const id=project||config.defaultProject;if(!projects.some(item=>item.id===id))throw new Error('启动项目不存在');
+        const remembered=(req.headers.cookie||'').split(';').map(item=>item.trim()).find(item=>item.startsWith(cookieName+'='))?.slice(cookieName.length+1);
+        const id=project||(projects.some(item=>item.id===remembered)?remembered:config.defaultProject);if(!projects.some(item=>item.id===id))throw new Error('启动项目不存在');
         res.writeHead(302,{Location:`/p/${id}/`,'Cache-Control':'no-store'});res.end();return;
       }
       const match=url.pathname.match(/^\/p\/([a-zA-Z][\w-]*)\/(.*)$/),item=match&&config.projects.find(item=>item.id===match[1]);
       if(!item)return send(404,{error:'项目入口不存在'});
+      if(req.method==='GET'&&!match[2])res.setHeader?.('Set-Cookie',`${cookieName}=${item.id}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
       const key=JSON.stringify(item);if(!stores.has(key))stores.set(key,createStore(item.root,item));
       const store=await stores.get(key),basePath=`/p/${item.id}`;
       req.url='/'+match[2]+url.search;
