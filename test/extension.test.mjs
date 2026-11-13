@@ -38,3 +38,26 @@ test('扩展清单限制依赖顺序和目录边界，符号链接不能读取�
   const f=await fixture(t);await fs.writeFile(path.join(f.extension,'extension.json'),JSON.stringify({entry:'index.mjs',files:['index.mjs','state.mjs']}));await assert.rejects(loadProjectExtension(f.extension),/顺序|末尾/);
   await fs.writeFile(path.join(f.extension,'extension.json'),JSON.stringify({entry:'escape.mjs',files:['escape.mjs']}));await fs.writeFile(path.join(f.root,'outside.mjs'),'export const secret="outside";');await fs.symlink(path.join(f.root,'outside.mjs'),path.join(f.extension,'escape.mjs'));await assert.rejects(loadProjectExtension(f.extension),/越界/);
 });
+test('显式声明完整输入时只复用未变化的成功校验，修改、失败和符号链接均重新校验',async t=>{
+  const f=await fixture(t),validation=path.join(f.root,'validation'),counter=path.join(f.root,'count.txt');await fs.mkdir(validation);
+  const config={entry:'index.mjs',files:['state.mjs','index.mjs'],declarative:true,validationCache:{validator:'validation/check.py',inputs:['artifact','validation']}};
+  await fs.writeFile(path.join(f.extension,'extension.json'),JSON.stringify(config));
+  await fs.writeFile(path.join(validation,'check.py'),`from pathlib import Path\np=Path('count.txt')\np.write_text(str(int(p.read_text())+1) if p.exists() else '1')\nif 'INVALID' in Path('artifact/pages/home.html').read_text(): raise ValueError('无效页面')\n`);
+  const store=await createStore(f.root,{extension:f.extension,validator:'validation/check.py'}),count=async()=>Number(await fs.readFile(counter,'utf8'));
+  await Promise.all([store.check(),store.check()]);assert.equal(await count(),1);
+  await store.check();assert.equal(await count(),1);
+  const page=path.join(f.root,'artifact/pages/home.html');await fs.writeFile(page,'INVALID');await assert.rejects(store.check(),/Command failed/);assert.equal(await count(),2);
+  await fs.writeFile(page,'<button>恢复</button>');await store.check();assert.equal(await count(),3);await store.check();assert.equal(await count(),3);
+  const modelFile=path.join(f.root,'artifact/workbench.json'),model=JSON.parse(await fs.readFile(modelFile,'utf8'));model.title='修改项目';await fs.writeFile(modelFile,JSON.stringify(model));
+  await store.check();assert.equal(await count(),4);
+  await fs.symlink('home.html',path.join(f.root,'artifact/pages/linked.html'));await store.check();await store.check();assert.equal(await count(),6);
+});
+test('校验期间输入发生变化时不缓存该次结果',async t=>{
+  const f=await fixture(t),validation=path.join(f.root,'validation'),started=path.join(f.root,'started'),counter=path.join(f.root,'count.txt');await fs.mkdir(validation);
+  await fs.writeFile(path.join(f.extension,'extension.json'),JSON.stringify({entry:'index.mjs',files:['state.mjs','index.mjs'],declarative:true,validationCache:{validator:'validation/check.py',inputs:['artifact','validation']}}));
+  await fs.writeFile(path.join(validation,'check.py'),`from pathlib import Path\nimport time\np=Path('count.txt')\np.write_text(str(int(p.read_text())+1) if p.exists() else '1')\nPath('started').write_text('ok')\ntime.sleep(.2)\n`);
+  const store=await createStore(f.root,{extension:f.extension,validator:'validation/check.py'}),first=store.check();
+  for(let attempt=0;attempt<100;attempt++){try{await fs.access(started);break;}catch{await new Promise(resolve=>setTimeout(resolve,10));}}
+  await fs.access(started);await fs.appendFile(path.join(f.root,'artifact/pages/home.html'),'<!-- 修改 -->');await first;await store.check();
+  assert.equal(await fs.readFile(counter,'utf8'),'2');
+});

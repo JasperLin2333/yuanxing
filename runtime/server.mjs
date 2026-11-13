@@ -28,11 +28,22 @@ async function fingerprint(target){
     return sha([stat.mode,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs,stat.isSymbolicLink()?await fs.readlink(target):''].join(':'));
   }catch(error){if(error.code==='ENOENT')return 'missing';throw error;}
 }
+// 只有项目显式声明的完整校验输入才可复用；符号链接可能指向未监视的内容，遇到时退回逐次校验。
+async function validationFingerprint(target){
+  try{
+    const stat=await fs.lstat(target,{bigint:true});
+    if(stat.isSymbolicLink()){const error=new Error('校验输入含符号链接');error.code='VALIDATION_SYMLINK';throw error;}
+    if(stat.isDirectory()){const names=(await fs.readdir(target)).sort();return sha(JSON.stringify(await Promise.all(names.map(async name=>[name,await validationFingerprint(path.join(target,name))]))));}
+    return sha([stat.mode,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs].join(':'));
+  }catch(error){if(error.code==='ENOENT')return 'missing';throw error;}
+}
 // 扩展必须由启动参数明确指定；只提供清单内的脚本，不暴露项目目录。
 export async function loadProjectExtension(directory){
   if(!directory)return null;
   const root=await fs.realpath(path.resolve(directory)),config=JSON.parse(await fs.readFile(await safePath(root,'extension.json'),'utf8'));
   if(!Array.isArray(config.files)||!config.files.length||new Set(config.files).size!==config.files.length||!config.files.includes(config.entry)||config.files.some(file=>typeof file!=='string'||!/^\w[\w/-]*\.mjs$/.test(file)||file.includes('..')))throw new Error('项目扩展清单不正确');
+  const cache=config.validationCache;
+  if(cache!==undefined&&(!cache||typeof cache!=='object'||Array.isArray(cache)||typeof cache.validator!=='string'||!cache.validator||path.isAbsolute(cache.validator)||!Array.isArray(cache.inputs)||!cache.inputs.length||cache.inputs.some(input=>typeof input!=='string'||!input||path.isAbsolute(input)||input.split(/[\\/]/).includes('..'))||cache.validator.split(/[\\/]/).includes('..')))throw new Error('项目校验缓存配置不正确');
   const previous=new Set();
   for(const file of config.files){
     const source=await fs.readFile(await safePath(root,file),'utf8');
@@ -44,7 +55,7 @@ export async function loadProjectExtension(directory){
     previous.add(file);
   }
   if(config.files.at(-1)!==config.entry)throw new Error('扩展入口必须位于清单末尾');
-  return {root,entry:config.entry,files:config.files,declarative:config.declarative===true};
+  return {root,entry:config.entry,files:config.files,declarative:config.declarative===true,...(cache?{validationCache:cache}:{})};
 }
 async function extensionSource(extension,file,basePath=""){
   const source=await fs.readFile(await safePath(extension.root,file),'utf8');
@@ -69,7 +80,7 @@ function assertClipboardHTML(text,label){
 }
 export async function createStore(root,{builder,validator,extension}={}){
   const projectExtension=await loadProjectExtension(extension);
-  root=await fs.realpath(root);const artifact=await fs.realpath(path.join(root,'artifact')),modelFile=path.join(artifact,'workbench.json');if(!inside(root,artifact))throw new Error('artifact 目录越界');let building,buildSig,queue=Promise.resolve();
+  root=await fs.realpath(root);const artifact=await fs.realpath(path.join(root,'artifact')),modelFile=path.join(artifact,'workbench.json');if(!inside(root,artifact))throw new Error('artifact 目录越界');let building,buildSig,queue=Promise.resolve(),validationSig,validationFlight;
   async function readModel(){try{const raw=await fs.readFile(await safePath(artifact,'workbench.json'),'utf8');return {model:JSON.parse(raw),revision:sha(raw)};}catch(error){if(error.code!=='ENOENT')throw error;const manifest=JSON.parse(await fs.readFile(await safePath(artifact,'manifest.json'),'utf8'));const model=importManifest(manifest);for(const r of manifest.requirements||[])for(const s of r.states||[]){const html=await fs.readFile(await safePath(artifact,s.html),'utf8');for(const t of r.transitions||[])if(html.includes(`data-transition-id="${t.id}"`))model.edges.push({id:`${r.id}:${s.id}:${t.id}`,from:`${r.id}:${s.id}`,to:`${r.id}:${t.to}`,label:t.id,selector:`[data-transition-id="${t.id}"]`});}return {model,revision:'import'};}}
   const renderInputs=model=>model.nodes.filter(n=>n.kind!=='note').map(n=>({id:n.id,path:n.path,render:n.render}));
   // 同一份构建输入同时用于失效判断和轻量资源版本，包含同目录辅助脚本及参考图片。
@@ -206,7 +217,15 @@ export async function createStore(root,{builder,validator,extension}={}){
       copy.images=images;copy.fragments={};copy.imported=true;copy.projectKey=sha(root);copy.sourceExtension=!!projectExtension;return copy;
     }catch(error){for(const relative of created)await fs.rm(path.join(artifact,relative),{force:true});throw error;}
   }
-  async function check(){const {model}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));if(validator)await exec('python3',[await safePath(root,validator),'--validate'],{cwd:root,maxBuffer:2*1024*1024});}
+  async function check(){
+    const {model}=await readModel(),errors=validate(model);if(errors.length)throw new Error(errors.join('；'));if(!validator)return;
+    const script=await safePath(root,validator),cache=projectExtension?.validationCache;
+    if(!cache||path.normalize(cache.validator)!==path.normalize(validator)){await exec('python3',[script,'--validate'],{cwd:root,maxBuffer:2*1024*1024});return;}
+    const prior=validationFlight;
+    const snapshot=async()=>{try{return sha(JSON.stringify([(await readModel()).revision,await validationFingerprint(script),await Promise.all(cache.inputs.map(async input=>validationFingerprint(await safePath(root,input))))]));}catch(error){if(error.code==='VALIDATION_SYMLINK')return null;throw error;}};
+    const job=(async()=>{if(prior)await prior;const before=await snapshot();if(before&&before===validationSig)return;await exec('python3',[script,'--validate'],{cwd:root,maxBuffer:2*1024*1024});const after=await snapshot();validationSig=before&&before===after?after:undefined;})();
+    validationFlight=job;try{await job;}finally{if(validationFlight===job)validationFlight=undefined;}
+  }
   return {root,artifact,load,status,readModel,save,saveDocumentSource,upload,importClipboard,check,extension:projectExtension};
 }
 export async function standalone(bundle,{module,entryModule,view='review',flow,extension}={}){

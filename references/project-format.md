@@ -195,3 +195,5 @@ node "<Skill目录>/scripts/yuanxing.mjs" export --root ./my-project --extension
 扩展仅在明确指定后加载，浏览器只可读取清单内的脚本。依赖必须使用相对导入并按清单顺序列出，不支持动态导入。导出项目时，指定的扩展会与通用内核一起内嵌；普通导出和 Skill 安装包不会自动携带其他项目的扩展或数据。
 
 已有项目使用 Python 组装固定状态时，可加 `--builder scripts/build.py`；导出检查脚本可通过 `--validator scripts/check.py` 指定，校验时会带上 `--validate`。脚本路径相对项目根目录。
+
+仅当校验结果完全由项目内明确的文件决定时，可在扩展清单声明 `"validationCache": {"validator": "scripts/check.py", "inputs": ["artifact", "scripts"]}`，列全该校验器读取的目录和文件。指定校验器、编排及任一输入变化时重新校验；只复用同一工作台进程内、输入在校验前后均未变化的成功结果，遇到符号链接则逐次校验。依赖网络、环境或未列出的文件时不要启用；未声明或校验器不匹配时保持逐次校验。

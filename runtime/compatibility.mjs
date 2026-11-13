@@ -42,12 +42,12 @@ function compatMatches(node,parts,index=parts.length-1) {
   for(let parent=node.parent;parent;parent=parent.parent)if(compatMatches(parent,parts,index-1)===true)return true;
   return false;
 }
-export function compatibleSelectorTargets(html,selector) {
+export function compatibleSelectorTargets(html,selector,elements) {
   const parts=typeof selector==='string'?compatSelectorParts(selector):null;
   if(!parts)return {supported:false,elements:[]};
   // 先检查语法，避免一个早期不匹配的简单选择器掩盖后续不支持的语法。
   for(const part of parts){let rest=part.text.replace(/^(\*|[a-z][\w-]*)/i,'');rest=rest.replace(/([.#])((?:\\.|[\w-])+)|\[\s*[\w:-]+\s*(?:(?:\^=|\$=|\*=|~=|\|=|=)\s*(?:"[^"]*"|'[^']*'|[^\]\s]+)\s*i?)?\s*\]|:(?:first-child|last-child)|:(?:nth-child|nth-of-type)\(\s*(?:\d+|odd|even)\s*\)/gi,'');if(rest)return {supported:false,elements:[]};}
-  try{return {supported:true,elements:compatElements(html).filter(node=>compatMatches(node,parts)===true)};}catch{return {supported:false,elements:[]};}
+  try{return {supported:true,elements:(elements||compatElements(html)).filter(node=>compatMatches(node,parts)===true)};}catch{return {supported:false,elements:[]};}
 }
 function compatUpdateTags(html,marks) {
   const edits=[...marks.entries()].map(([node,attributes])=>{
@@ -74,7 +74,7 @@ function compatPageHtml(html,marks,defaults) {
   for(const element of elements){const own=[...element.attrs].filter(([name])=>/^on[a-z]+$/.test(name));if(!own.length)continue;const id='handler-'+handlers.length;handlerMarks.set(element,{'data-yuanxing-handler':id});for(const [name,code] of own)handlers.push({id,event:name.slice(2),code});}
   html=compatUpdateTags(html,handlerMarks);
   // 重新定位后逐标签删除内联处理器，不触碰 script/style 的文本。
-  const removals=compatElements(html).map(element=>({element,tag:html.slice(element.start,element.end).replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,'')})).sort((a,b)=>b.element.start-a.element.start);
+  const removals=compatElements(html).map(element=>{const original=html.slice(element.start,element.end),tag=original.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,'');return {element,tag,changed:tag!==original};}).filter(edit=>edit.changed).sort((a,b)=>b.element.start-a.element.start);
   for(const {element,tag} of removals)html=html.slice(0,element.start)+tag+html.slice(element.end);
   let script=handlers.map(({id,event,code})=>`document.querySelector('[data-yuanxing-handler="${id}"]').addEventListener(${JSON.stringify(event)},function(event){const result=(function(event){${code}\n}).call(this,event);if(result===false)event.preventDefault();});`).join('\n');
   if(/data-yx-(?:action|bind|text|visible|initial-visible)/.test(html))script+=`\n(${compatLocalActions.toString()})(${JSON.stringify(defaults||{}).replace(/</g,'\\u003c')});`;
@@ -114,12 +114,12 @@ export function createCompatibilityBundle(bundle) {
       for(const text of documentText.byNode.get(node.id)||[])addLogic(root,text);
       for(const edge of groupEdges.filter(e=>e.from===node.id)){
         const selector=node.kind==='image'&&edge.rect?`[data-yuanxing-edge="${edge.id}"]`:edge.selector;
-        const result=selector?compatibleSelectorTargets(html,selector):{supported:false,elements:[]};
+        const result=selector?compatibleSelectorTargets(html,selector,elements):{supported:false,elements:[]};
         if(!result.supported||!result.elements.length){limitations.push({type:result.supported?'missing-control':'selector-adaptation',node:node.id,edge:edge.id,selector:selector||null});addLogic(root,`${edge.label||'操作'} → ${byId.get(edge.to).title}${edge.description?'\n'+edge.description:''}`);continue;}
         for(const matched of result.elements){const element=elements.find(e=>e.start===matched.start);const list=edgeByElement.get(element.start)||{element,edges:[]};list.edges.push(edge);edgeByElement.set(element.start,list);addLogic(element,[edge.rule?model.rules?.[edge.rule]:'',edge.description].filter(Boolean).join('\n\n'));}
         bindings.push({requirement:requirement.id,node:node.id,edge:edge.id,transition:transitionIds.get(edge.id),selector,when:edge.when||{},setContext:edge.setContext||{}});
       }
-      for(const annotation of model.annotations.filter(a=>a.node===node.id||a.edge&&groupEdges.some(e=>e.id===a.edge&&e.from===node.id))){const result=annotation.selector?compatibleSelectorTargets(html,annotation.selector):null;const element=result?.elements[0];addLogic(element?elements.find(e=>e.start===element.start):root,annotation.text);}
+      for(const annotation of model.annotations.filter(a=>a.node===node.id||a.edge&&groupEdges.some(e=>e.id===a.edge&&e.from===node.id))){const result=annotation.selector?compatibleSelectorTargets(html,annotation.selector,elements):null;const element=result?.elements[0];addLogic(element?elements.find(e=>e.start===element.start):root,annotation.text);}
       for(const {element,edges:targetEdges} of edgeByElement.values()){
         const conditional=targetEdges.length>1||targetEdges.some(e=>Object.keys(e.when||{}).length);
         if(conditional){marks.set(element,{'data-yuanxing-transition-ids':targetEdges.map(e=>transitionIds.get(e.id)).join(' ')});addLogic(element,targetEdges.map(e=>`${e.condition||e.label||'操作'}${Object.keys(e.when||{}).length?'（'+Object.entries(e.when).map(([key,value])=>`${key}=${JSON.stringify(value)}`).join('，')+'）':''} → ${byId.get(e.to).title}`).join('\n'));limitations.push({type:'conditional-transition',node:node.id,edges:targetEdges.map(e=>e.id)});}
