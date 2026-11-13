@@ -4,7 +4,7 @@ description: 元形（Yuanxing）：用自然语言进行产品需求设计与�
 license: MIT
 metadata:
   author: JasperLin2333
-  version: "0.4.11"
+  version: "0.4.12"
 ---
 
 # 元形
