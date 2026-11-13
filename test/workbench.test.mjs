@@ -92,6 +92,22 @@ test('资源版本变化但内容相同时推进探测基线，避免每次轮�
   const f=await sourceRefreshFixture(),flight=f.run();await f.ready;f.respond({revision:'before',model:fixture(),sourceVersion:'new',sourcesSignature:'before',images:{}});await flight;
   assert.equal(f.context.bundle.sourceVersion,'new');assert.equal(f.renders(),0);
 });
+test('源文档标题失效时提示旧内容，恢复后自动清除，不覆盖保存提示或重复打扰',async()=>{
+  const f=await sourceRefreshFixture(),message={hidden:true,dataset:{}},notices=[];let failure='需求正文标题不存在：原章节',endpoint='status';
+  f.context.$=()=>message;f.context.notice=(text,actions,kind)=>{notices.push(text);message.hidden=false;message.dataset.kind=kind;};f.context.closeNotice=()=>{message.hidden=true;};
+  f.context.fetch=async url=>{
+    if(url.endsWith('/status')&&endpoint==='project')return {ok:true,json:async()=>({revision:'before',sourceVersion:'changed'})};
+    return failure?{ok:false,json:async()=>({error:failure})}:{ok:true,json:async()=>({revision:'before',sourceVersion:'unchanged'})};
+  };
+  f.context.bundle.sourceVersion='unchanged';const before=f.context.bundle;
+  await f.run();assert.equal(notices.length,1);assert.match(notices[0],/原章节.*上次内容/);assert.equal(message.dataset.kind,'source');assert.equal(f.context.bundle,before);
+  message.hidden=true;await f.run();assert.equal(notices.length,1);
+  failure=null;await f.run();assert.equal(message.hidden,true);
+  endpoint='project';failure='需求正文标题重复：新章节';message.hidden=false;message.dataset.kind='save';await f.run();assert.equal(notices.length,1);assert.equal(message.dataset.kind,'save');
+  message.hidden=true;await f.run();assert.equal(notices.length,2);assert.match(notices[1],/标题重复：新章节/);
+  failure=null;endpoint='status';await f.run();assert.equal(message.hidden,true);assert.equal(f.context.bundle,before);
+  f.context.fetch=async()=>{throw new TypeError('network unavailable');};await f.run();assert.equal(notices.length,2);
+});
 test('连线绘制同帧合并，相同几何不重建，隐藏连线时不计算路径',async()=>{
   const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8'),draw=app.slice(app.indexOf('function drawLines(){'),app.indexOf('function edgeGeometryGesture(')),sections=app.slice(app.indexOf('function renderSections(){'),app.indexOf('function highlightCards('));
   let queued=[],writes=0,routes=0,sectionWrites=0;const svg={childNodes:[],set innerHTML(value){writes++;this.childNodes=[value];},append(...items){this.childNodes.push(...items);},replaceChildren(){this.childNodes=[];}},sectionHost={replaceChildren(){sectionWrites++;},append(){}},element=()=>({classList:{add(){},toggle(){}},dataset:{},setAttribute(){},append(){},replaceChildren(){}});

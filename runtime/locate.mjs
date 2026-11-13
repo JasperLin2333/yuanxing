@@ -18,10 +18,12 @@ export async function locateProject(root,{query='',module,limit=6}={}) {
   const sectionNodes=new Set();
   for(const block of blocks)if(terms.length&&block.type==='source'&&matches(block.section))for(const id of block.nodes||[])sectionNodes.add(id);
   const candidates=model.nodes.filter(node=>!module||node.module===module);
-  let found=candidates.filter(node=>!terms.length||sectionNodes.has(node.id)||matches([node.id,node.title,node.module,modules.get(node.module)?.title].join(' ')));
-  let matchedBy='名称与章节';
-  if(!found.length){found=candidates.filter(node=>matches([node.summary,node.description,model.rules?.[node.rule]].join(' ')));matchedBy='说明正文';}
-  const exact=normalize(query).trim(),rank=node=>(normalize(node.id)===exact?1000:0)+(terms.length&&matches(node.title)?100:0)+(sectionNodes.has(node.id)?50:0);
+  const matchesName=node=>!terms.length||sectionNodes.has(node.id)||matches([node.id,node.title,node.module,modules.get(node.module)?.title].join(' '));
+  const matchesDescription=node=>terms.length&&matches([node.summary,node.description,model.rules?.[node.rule]].join(' '));
+  const found=candidates.filter(node=>matchesName(node)||matchesDescription(node));
+  const hasName=found.some(matchesName),hasDescription=found.some(node=>!matchesName(node)&&matchesDescription(node));
+  const matchedBy=hasName?(hasDescription?'名称、章节与说明正文':'名称与章节'):'说明正文';
+  const exact=normalize(query).trim(),rank=node=>(matchesName(node)?2000:0)+(normalize(node.id)===exact?1000:0)+(terms.length&&matches(node.title)?100:0)+(sectionNodes.has(node.id)?50:0);
   found.sort((a,b)=>rank(b)-rank(a));
   const selected=found.slice(0,limit),ids=new Set(selected.map(node=>node.id));
   const editingSources=node=>{

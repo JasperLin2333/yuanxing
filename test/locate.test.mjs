@@ -35,6 +35,19 @@ test('结果限制、正文兜底与未知生成来源保持明确',async t=>{
   delete model.nodes[1].sources;await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));assert.deepEqual((await locateProject(root,{query:'assign'})).pages[0].editingSources,[]);
   await assert.rejects(locateProject(root,{limit:0}),/数量/);await assert.rejects(locateProject(root,{module:'missing'}),/不存在/);
 });
+test('名称或章节已有命中时仍包含说明及共用规则中的其他页面，且名称优先',async t=>{
+  const {root,model}=await fixture(t);
+  model.nodes.unshift({id:'related',module:'settings',title:'其他入口',kind:'html',path:'related.html',summary:'支持分配客户'});
+  model.nodes.push({id:'shared-rule',module:'settings',title:'其他状态',kind:'html',path:'rule.html',rule:'shared'});
+  model.rules={shared:'处理分配客户'};
+  await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));
+  const result=await locateProject(root,{query:'分配客户',limit:30});
+  assert.equal(result.matchedBy,'名称、章节与说明正文');
+  assert.deepEqual(result.pages.map(page=>page.id),['list','assign','related','shared-rule']);
+  const limited=await locateProject(root,{query:'分配客户',limit:2});
+  assert.equal(limited.totalMatches,4);assert.equal(limited.truncated,true);
+  assert.match(formatLocateResult(limited),/结果已截断/);
+});
 test('正文定位遵守项目边界并暴露失效章节',async t=>{
   const {root,model}=await fixture(t);model.document.blocks[0].section='已删除';await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));await assert.rejects(locateProject(root,{query:'assign'}),/标题不存在/);
   model.document.blocks[0].path='../outside.md';await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify(model));await assert.rejects(locateProject(root,{query:'assign'}),/越界/);

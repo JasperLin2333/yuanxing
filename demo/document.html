@@ -4735,7 +4735,7 @@ function notice(text,actions=[],kind='info'){
   closeNotice();const message=$('#message');message.dataset.kind=kind;message.hidden=false;message.replaceChildren(document.createTextNode(text));
   for(const [label,fn] of actions){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;message.append(b);}
   const close=document.createElement('button');close.type='button';close.className='message-close';close.textContent='×';close.title='关闭提示';close.setAttribute('aria-label','关闭提示');close.onclick=closeNotice;message.append(close);
-  if(kind!=='save')noticeTimer=setTimeout(closeNotice,5000);
+  if(kind!=='save'&&kind!=='source')noticeTimer=setTimeout(closeNotice,5000);
 }
 function updateHistoryButtons(){document.querySelector('[data-action="undo"]').disabled=!history.past.length;}
 function edit(fn,render=true,group=null,{background=false}={}){if(readonly&&(!background||originalReadonly))return;history.push(model,{group});fn(model);dirty=true;updateHistoryButtons();scheduleSave();if(render)renderAll();}
@@ -5558,18 +5558,29 @@ function restoreRuntimeView(){
 async function refreshSources(){
   if(readonly||document.hidden||dirty||saving||conflict||sourceRefreshFlight||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return;
   if(runtimeUpdateBlocked())return;
+  async function reportSourceError(response){
+    const error=(await response.json().catch(()=>null))?.error;
+    if(!/^需求正文标题(?:不存在|重复)：/.test(error||'')||refreshSources.reportedError===error)return;
+    const message=$('#message');if(!message.hidden&&message.dataset.kind==='save')return;
+    notice('需求文档暂未同步：'+error+'。当前仍显示上次内容，请让 AI 检查原文标题与工作台引用。',[],'source');
+    refreshSources.reportedError=error;
+  }
+  function clearSourceError(){
+    if(!refreshSources.reportedError)return;
+    refreshSources.reportedError=null;const message=$('#message');if(message.dataset.kind==='source')closeNotice();
+  }
   flushModelRender();
   const requestedRevision=revision;sourceRefreshFlight=true;
   try{
-    const metadata=await fetch(apiBase+'/api/project/status');if(!metadata.ok)return;const status=await metadata.json();
+    const metadata=await fetch(apiBase+'/api/project/status');if(!metadata.ok){await reportSourceError(metadata);return;}const status=await metadata.json();
     if(dirty||saving||revision!==requestedRevision||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId)return;
     if(status.runtimeVersion&&loadedRuntimeVersion&&status.runtimeVersion!==loadedRuntimeVersion){if(pendingRuntimeVersion!==status.runtimeVersion){pendingRuntimeVersion=status.runtimeVersion;return;}reloadUpdatedWorkbench();return;}
     pendingRuntimeVersion=null;
-    if(status.revision===revision&&status.sourceVersion===bundle.sourceVersion)return;
-    const r=await fetch(apiBase+'/api/project');if(!r.ok)return;const next=await r.json();
+    if(status.revision===revision&&status.sourceVersion===bundle.sourceVersion){clearSourceError();return;}
+    const r=await fetch(apiBase+'/api/project');if(!r.ok){await reportSourceError(r);return;}const next=await r.json();
     // 请求发出后可能发生剪切、粘贴及保存；旧响应不能替换更新后的本地状态。
     if(dirty||saving||revision!==requestedRevision||pendingImages.size||activeCanvasGesture||cancelConnection||annotationEditorId||runtimeUpdateBlocked()||document.activeElement?.matches('input,textarea,[contenteditable]'))return;
-    if(next.revision!==revision){history.rebase(baseModel,next.model);model=next.model;baseModel=clone(model);revision=next.revision;bundle=next;selected=null;if(!node(current))current=null;renderAll();}
+    clearSourceError();if(next.revision!==revision){history.rebase(baseModel,next.model);model=next.model;baseModel=clone(model);revision=next.revision;bundle=next;selected=null;if(!node(current))current=null;renderAll();}
     else {next.images={...bundle.images,...next.images};const changed=next.sourcesSignature!==bundle.sourcesSignature,currentChanged=current&&canvasPreviewSignature(node(current),next)!==canvasPreviewSignature(node(current),bundle);bundle=next;if(changed){positions={};missing.clear();if(documentMode)documentView.render();else if(current){if(currentChanged)viewer();renderInspector();}else canvas();}}
   }catch{/* 本地服务暂不可用，已编辑内容留在内存，保存操作负责提示与重试。 */}
   finally{sourceRefreshFlight=false;}
