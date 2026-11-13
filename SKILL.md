@@ -4,7 +4,7 @@ description: 元形（Yuanxing）：用自然语言进行产品需求设计与�
 license: MIT
 metadata:
   author: JasperLin2333
-  version: "0.4.9"
+  version: "0.4.10"
 ---
 
 # 元形
@@ -36,6 +36,7 @@ node "<Skill目录>/scripts/yuanxing.mjs" locate --root "<项目目录>" --query
 - 先读目标当前内容，保留无关页面、画布位置、连线、批注及用户改动。人与 Agent 并行编辑编排时保留原始 JSON 基线，用 `apply --root <项目目录> --base <修改前JSON> --model <修改后JSON>` 合并，同字段冲突保留双方；临时文件收口清理。
 - 评审后的需求或原型发生变化时，用 `updates add --root <项目目录> --text <变化> [--node <页面>]` 把对评审、开发有意义的变化追加到更新说明，默认当天日期；规划阶段不写更新说明，完整规则仍写在 PRD，不记录制作过程。格式见[项目格式](references/project-format.md#更新说明)。
 - 复用已有 HTML、截图、风格与组件；项目外输入复制后使用。页面优先自包含 HTML/CSS/少量 JavaScript；同一页面的流程节点优先共用页面和初始状态配置，表单、Tabs 和辅助弹层留在页内，只为独立任务阶段、主要操作或结果拆节点。
+- 编写或修改原型、工作台的网页交互时，按本轮涉及的输入、弹层、拖拽、状态保留及兼容性读取 [Web 交互与离线兼容](references/web-interactions.md) 的相关小节；延续已有设计，不借此增加业务步骤或重构无关组件。
 - 只实现用户要求与已有设计，按用户最新决定替换旧规则，业务内容进入已有正文，不另建过程文档。跨页修改按业务含义定位关联源与交互，不能只改相同标识或同名字面文字；不加共用逻辑管理入口或另一个 AI 输入框。批注用于说明，不自动执行。
 - 多项目仅登记用户指定项目，沿用已有工作区；工作区和私人项目不进入 Skill 发布包。命令见[Agent 接入](references/agent-adaptation.md)。
 
