@@ -1,6 +1,6 @@
 // 编辑端、离线分享端与校验共用的数据操作。
 import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty} from './routing.mjs';
-import {validateDocument,pruneDocument,documentAssetPaths} from './document.mjs';
+import {validateDocument,pruneDocument,documentAssetPaths,walkDocument} from './document.mjs';
 export const clone = value => JSON.parse(JSON.stringify(value));
 export function offlineExportHTML(html,view){
   if(!['review','document','prototype'].includes(view))throw new Error('导出视图不正确');
@@ -639,8 +639,8 @@ export function exportSubset(model, moduleId) {
   if(result.groups)result.groups=result.groups.filter(g=>moduleIds.has(g.module)).map(g=>({...g,nodes:g.nodes.filter(id=>keep.has(id))})).filter(g=>g.nodes.length>1);
   if(result.recyclePositions)result.recyclePositions=Object.fromEntries(Object.entries(result.recyclePositions).filter(([id])=>keep.has(id)));
   if(result.referencePositions)result.referencePositions=Object.fromEntries(Object.entries(result.referencePositions).filter(([id])=>moduleIds.has(id)).map(([id,positions])=>[id,Object.fromEntries(Object.entries(positions).filter(([nodeId])=>keep.has(nodeId)))]));
-  if(result.rules){const used=new Set([...result.nodes,...result.edges].map(v=>v.rule).filter(Boolean));result.rules=Object.fromEntries(Object.entries(result.rules).filter(([id])=>used.has(id)));}
   pruneDocument(result);
+  if(result.rules){const used=new Set([...result.nodes,...result.edges].map(v=>v.rule).filter(Boolean));walkDocument(result.document?.blocks,block=>{if(block.rule)used.add(block.rule);});result.rules=Object.fromEntries(Object.entries(result.rules).filter(([id])=>used.has(id)));}
   return result;
 }
 export function exportIssues(model){

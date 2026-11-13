@@ -3807,8 +3807,8 @@ export function exportSubset(model, moduleId) {
   const moduleIds=new Set(result.modules.map(m=>m.id));
   if(result.groups)result.groups=result.groups.filter(g=>moduleIds.has(g.module)).map(g=>({...g,nodes:g.nodes.filter(id=>keep.has(id))})).filter(g=>g.nodes.length>1);
   if(result.referencePositions)result.referencePositions=Object.fromEntries(Object.entries(result.referencePositions).filter(([id])=>moduleIds.has(id)).map(([id,positions])=>[id,Object.fromEntries(Object.entries(positions).filter(([nodeId])=>keep.has(nodeId)))]));
-  if(result.rules){const used=new Set([...result.nodes,...result.edges].map(v=>v.rule).filter(Boolean));result.rules=Object.fromEntries(Object.entries(result.rules).filter(([id])=>used.has(id)));}
   pruneDocument(result);
+  if(result.rules){const used=new Set([...result.nodes,...result.edges].map(v=>v.rule).filter(Boolean));walkDocument(result.document?.blocks,block=>{if(block.rule)used.add(block.rule);});result.rules=Object.fromEntries(Object.entries(result.rules).filter(([id])=>used.has(id)));}
   return result;
 }
 export function exportIssues(model){

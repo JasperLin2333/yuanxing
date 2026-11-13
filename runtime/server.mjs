@@ -12,7 +12,7 @@ import {offlineCore,offlineLibrary,offlineApp,offlineStyles,offlineIndex,offline
 import {launchIdentity} from './launcher.mjs';
 import {safePath} from './paths.mjs';
 export {safePath} from './paths.mjs';
-import {documentSourceBlocks,documentSourceKey,extractDocumentSource,patchDocumentSource} from './document.mjs';
+import {documentSourceBlocks,documentSourceKey,extractDocumentSource,patchDocumentSource,walkDocument} from './document.mjs';
 import {clone,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,recycleNodes,removeNodes,mergeProject} from './core.mjs';
 const exec=promisify(execFile),tool=path.dirname(fileURLToPath(import.meta.url));
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -232,7 +232,17 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const projectExtension=typeof extension==='string'?await loadProjectExtension(extension):extension;
   if(!['review','prototype','document'].includes(view))throw new Error('导出视图不正确');
   const source=clone(bundle.model),recycled=recycleNodes(source).map(n=>n.id);
-  if(recycled.length)removeNodes(source,recycled);delete source.recyclePositions;
+  if(recycled.length){
+    const priorNodes=source.nodes,priorEdges=source.edges;
+    removeNodes(source,recycled);
+    const nodeIds=new Set(source.nodes.map(n=>n.id)),edgeIds=new Set(source.edges.map(e=>e.id));
+    const recycledIds=new Set(recycled);if(source.updates)source.updates=source.updates.filter(update=>!recycledIds.has(update.node));
+    const removedRules=new Set([...priorNodes.filter(n=>!nodeIds.has(n.id)),...priorEdges.filter(e=>!edgeIds.has(e.id))].map(item=>item.rule).filter(Boolean));
+    const retainedRules=new Set([...source.nodes,...source.edges].map(item=>item.rule).filter(Boolean));
+    walkDocument(source.document?.blocks,block=>{if(block.rule)retainedRules.add(block.rule);});
+    for(const rule of removedRules)if(!retainedRules.has(rule))delete source.rules?.[rule];
+  }
+  delete source.recyclePositions;
   const model=exportSubset(source,module);if(entryModule&&model.modules.some(m=>m.id===entryModule))model.entryModule=entryModule;
   const errors=exportIssues(model);if(errors.length)throw new Error(errors.join('；'));
   const resources=Object.fromEntries(model.nodes.filter(n=>bundle.resources[n.id]).map(n=>[n.id,bundle.resources[n.id]]));

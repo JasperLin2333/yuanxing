@@ -493,4 +493,25 @@ test('整项目和单模块的两种导出均排除回收站，保留内部交�
   }
   assert.deepEqual(bundle,before);
 });
+test('分享排除回收站专属规则与图片，保留活动页面和文档共用规则',async()=>{
+  const model=fixture();
+  model.rules={secret:'recycle-rule-secret ![旧图](assets/secret.png)',shared:'shared-rule',doc:'document-rule',public:'unreferenced-public-rule'};
+  model.nodes[0].rule='shared';
+  model.nodes.push({...clone(model.nodes[0]),id:'trash-secret',overview:false,rule:'secret'},
+    {...clone(model.nodes[0]),id:'trash-shared',overview:false,rule:'shared'},
+    {...clone(model.nodes[0]),id:'trash-document',overview:false,rule:'doc'});
+  model.document={version:1,blocks:[{id:'doc-shared',type:'description',rule:'doc'}]};
+  model.updates=[{id:'u1',date:'2026-01-01',text:'secret update',node:'trash-secret'},{id:'u2',date:'2026-01-01',text:'active update',node:'one'},{id:'u3',date:'2026-01-01',text:'project update'}];
+  const bundle={model,resources:{one:'<p>one</p>',two:'<p>two</p>','trash-secret':'<p>secret page</p>','trash-shared':'<p>shared</p>','trash-document':'<p>doc</p>'},fragments:{},images:{'assets/secret.png':'data:image/png;base64,c2VjcmV0'}};
+  const before=clone(bundle);
+  for(const module of [undefined,'a']){
+    const html=await standalone(bundle,{module}),boot=JSON.parse(html.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]).bundle;
+    assert.equal(boot.model.rules.secret,undefined);assert.equal(boot.model.rules.shared,'shared-rule');assert.equal(boot.model.rules.doc,'document-rule');
+    if(!module)assert.equal(boot.model.rules.public,'unreferenced-public-rule');
+    assert.deepEqual(boot.model.updates.map(update=>update.id),['u2','u3']);assert.deepEqual(boot.images,{});assert.doesNotMatch(html,/recycle-rule-secret|secret update|assets\/secret\.png|c2VjcmV0/);
+    const artifact=decodeExportArtifact(JSON.parse(html.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1]),gunzipSync);
+    assert.doesNotMatch(JSON.stringify(artifact),/recycle-rule-secret|assets\/secret\.png|c2VjcmV0/);
+  }
+  assert.deepEqual(bundle,before);
+});
 test('旧 manifest 的页面、逻辑和实际转移来源可导入',()=>temporary(async root=>{await fs.mkdir(path.join(root,'artifact/states'),{recursive:true});await fs.writeFile(path.join(root,'artifact/manifest.json'),JSON.stringify({requirements:[{id:'r',title:'旧页面',states:[{id:'a',html:'states/a.html',initial:true},{id:'b',html:'states/b.html'}],transitions:[{id:'T1',to:'b'}],logic:[{id:'L1',text:'旧规则'}]}]}));await fs.writeFile(path.join(root,'artifact/states/a.html'),'<button data-transition-id="T1">继续</button>');await fs.writeFile(path.join(root,'artifact/states/b.html'),'<p>结果</p>');const store=await createStore(root),bundle=await store.load();assert.equal(bundle.model.edges[0].from,'r:a');assert.equal(bundle.model.annotations[0].text,'旧规则');assert.equal(validate(bundle.model).length,0);}));
