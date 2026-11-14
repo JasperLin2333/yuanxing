@@ -152,14 +152,14 @@ node "<Skill目录>/scripts/yuanxing.mjs" apply --root "<项目目录>" --base "
 {"version":1,"defaultProject":"crm","projects":[{"id":"crm","title":"客户管理","root":"./crm"},{"id":"portal","title":"用户门户","root":"./portal","extension":"scripts/yuanxing"}]}
 ```
 
-Agent 使用 `workspace add --workspace <文件> --root <项目> --id <标识>` 登记，使用 `serve --workspace <文件> --open` 打开。顶栏切换项目时先等待保存，保存失败或冲突时留在原项目。项目分别使用 `/p/<id>/` URL、保存版本、视图偏好和项目扩展，避免串数据。新增项目登记后刷新工作台即可出现在选择器；离线导出仅内嵌当前项目，不携带整个工作区。
+Agent 使用 `workspace add --workspace <文件> --root <项目> --id <标识>` 登记，设计迭代时使用 `open --workspace <文件> --reuse` 启动或复用工作台；仅新启动服务时自动开页。顶栏切换项目时先等待保存，保存失败或冲突时留在原项目。项目分别使用 `/p/<id>/` URL、保存版本、视图偏好和项目扩展，避免串数据。新增项目登记后刷新工作台即可出现在选择器；离线导出仅内嵌当前项目，不携带整个工作区。
 
 ## 项目扩展
 
 通用工作台只维护 `runtime/` 一份实现。项目自己的页面、数据和专用交互放在项目目录，通过启动参数加载扩展；不复制或修改另一份工作台内核。普通项目无需扩展。
 
 ```sh
-node "<Skill目录>/scripts/yuanxing.mjs" serve --root ./my-project --extension ./my-project/extension --open
+node "<Skill目录>/scripts/yuanxing.mjs" open --root ./my-project --extension ./my-project/extension --reuse
 node "<Skill目录>/scripts/yuanxing.mjs" export --root ./my-project --extension ./my-project/extension --view review
 ```
 

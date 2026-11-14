@@ -43,6 +43,14 @@ function required(flags,key){if(!flags[key])throw new Error(`请指定 --${key}`
 function identifier(value){if(!/^[a-zA-Z][\w-]*$/.test(value))throw new Error('标识只能包含字母、数字、下划线或连字符，并以字母开头');return value;}
 async function exists(target){try{await fs.lstat(target);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}}
 function sameOrInside(root,target){return target===root||target.startsWith(root+path.sep);}
+// 输出目录可能尚不存在；从最近的现有父目录解析符号链接后再判断边界。
+async function resolveOutputPath(target){
+  let parent=path.dirname(target),suffix=[path.basename(target)];
+  for(;;){
+    try{return path.join(await fs.realpath(parent),...suffix);}
+    catch(error){const next=path.dirname(parent);if(error.code!=='ENOENT'||next===parent)throw error;suffix.unshift(path.basename(parent));parent=next;}
+  }
+}
 function today(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 function calendarDate(value){
   const valid=/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
@@ -111,7 +119,7 @@ export async function run(args,{sessionToken}={}){
     return serveWorkspace(path.resolve(flags.workspace),{port,open:!!flags.open,project:flags.project,sessionToken});
   }
   const root=path.resolve(required(flags,'root'));
-  const {createStore,standalone,serve}=await import('../runtime/server.mjs');
+  const {createStore,standalone,serve,safePath}=await import('../runtime/server.mjs');
   const {validate,exportIssues}=await import('../runtime/core.mjs');
   const store=await createStore(root,{builder:flags.builder,validator:flags.validator,extension:flags.extension});
   if(command==='serve'){
@@ -128,8 +136,8 @@ export async function run(args,{sessionToken}={}){
     const bundle=await store.load();
     if(flags.module&&!bundle.model.modules.some(m=>m.id===flags.module))throw new Error('模块不存在');
     if(flags.flow&&!flowEntries(bundle.model).some(flow=>flow.id===flags.flow))throw new Error('体验流程不存在');
-    const out=path.resolve(flags.out||path.join(root,'dist',view==='prototype'?'prototype.html':view==='document'?'document.html':'workbench.html'));
-    if(sameOrInside(path.join(root,'artifact'),out)||!out.toLowerCase().endsWith('.html'))throw new Error('导出应为 artifact 目录以外的 HTML 文件');
+    const out=await resolveOutputPath(path.resolve(flags.out||path.join(root,'dist',view==='prototype'?'prototype.html':view==='document'?'document.html':'workbench.html')));
+    if(sameOrInside(store.artifact,out)||!out.toLowerCase().endsWith('.html'))throw new Error('导出应为 artifact 目录以外的 HTML 文件');
     if(await exists(out)){const stat=await fs.lstat(out);if(stat.isSymbolicLink()||!stat.isFile()||!flags.replace)throw new Error('输出已存在；确认是生成文件后使用 --replace');}
     const html=await standalone(bundle,{module:flags.module,entryModule:flags.module,view,flow:flags.flow,extension:store.extension});
     await fs.mkdir(path.dirname(out),{recursive:true});await fs.writeFile(out,html,{flag:flags.replace?'w':'wx'});
@@ -174,7 +182,7 @@ export async function run(args,{sessionToken}={}){
     model.nodes.push({id,module:moduleId,title:flags.title||path.basename(source,path.extname(source)),kind,path:relative,width,height,x:siblings.length?Math.max(...siblings.map(n=>n.x+440)):60,y:60,description:''});
     const module=model.modules.find(m=>m.id===moduleId);module.entry??=id;
     const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));
-    await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,content,{flag:'wx'});
+    await fs.mkdir(path.dirname(target),{recursive:true});await safePath(store.artifact,relative,true);await fs.writeFile(target,content,{flag:'wx'});
     try{await store.save(model,revision,base);}catch(error){await fs.unlink(target);throw error;}
     console.log(`已添加 ${id}`);return;
   }

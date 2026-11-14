@@ -19,19 +19,19 @@
 通用入口（Node.js 20+）：
 
 ```sh
-node scripts/yuanxing.mjs serve --root ./my-prototype --open
+node "<Skill目录>/scripts/yuanxing.mjs" open --root "<项目目录>" --reuse
 ```
 
-本地地址默认 `http://127.0.0.1:4318`，可用 `--port` 改端口。关闭启动终端结束服务。`--builder` 为项目内的可选固定状态组装脚本；没有脚本的项目直接读取其 HTML 状态。可用 `--validator` 指定项目的导出校验脚本，导出前以 `--validate` 调用。 构建失效检查覆盖组装脚本所在目录、公共组件、模块、参考图片及节点的资源路径和 render 配置，辅助 Python 脚本修改后也会重新组装。
+本地地址默认 `http://127.0.0.1:4318`，可用 `--port` 改端口。`open --reuse` 在后台启动或复用工作台，仅新启动服务时自动开页，关闭启动终端不结束后台服务；需要手动重新打开时去掉 `--reuse`。`serve --open` 仍可用于前台运行，关闭其终端才结束该前台服务。`--builder` 为项目内的可选固定状态组装脚本；没有脚本的项目直接读取其 HTML 状态。可用 `--validator` 指定项目的导出校验脚本，导出前以 `--validate` 调用。 构建失效检查覆盖组装脚本所在目录、公共组件、模块、参考图片及节点的资源路径和 render 配置，辅助 Python 脚本修改后也会重新组装。
 
 ## 编辑来源
 
 每个项目的 `artifact/workbench.json` 是模块编排、连线和批注的编辑来源。页面和图片路径均相对 `artifact`，没有该文件时可导入已有 `manifest.json` 的页面、转移和说明。
 
 - `modules`：稳定的模块标识、标题及画布分区；`sections` 按讲解顺序定义模块内分区，节点通过 `section` 归属。目录顺序和画布分区使用同一配置。
-- `nodes`：稳定状态标识、所属模块、类型（`html / image / note`）、原始画布尺寸、位置、页面说明及资源路径；可用 `canvasType: pc / mobile` 指定卡片类型，只影响画布展示，不改变原始尺寸。重复场景可用 `overview: false` 不在概览和目录中重复展示，仍保留页面内对应交互。
+- `nodes`：稳定状态标识、所属模块、类型（`html / image / note`）、原始画布尺寸、位置、页面说明及资源路径；可用 `canvasType: pc / mobile` 指定卡片类型，只影响画布展示，不改变原始尺寸。仍需播放但不占画布的内部状态使用 `canvas: false`，导出时保留；同时设置 `overview: false` 可从目录隐藏。仅设置 `overview: false` 的普通节点进入回收站，导出时会排除该节点及其关联连线，不能用来保留离线交互状态。
 - 条件分叉使用 `kind: note, presentation: branch` 保存线上的共用分叉点；画布只显示连接点，条件名称标在线上，不作为页面卡片。`diagram: true` 连线只表达画布层级；原产品交互通过 `canvasFrom` 挂到线组时仍保留原页面及按钮绑定。
-- 同一页面的重复状态用 `overviewAlias` 指向一个可见节点，概览连线合并到该节点；实际页面仍展示各自状态，避免重复画下拉菜单或表单。
+- 同一页面的重复状态在保留为内部状态后，可用 `overviewAlias` 指向一个可见节点，概览连线合并到该节点；实际页面仍展示各自状态，避免重复画下拉菜单或表单。`overviewAlias` 不代替用于保留播放与导出的 `canvas: false`。
 - `edges`：来源状态、目标状态、操作名称、分支条件和说明。HTML 使用 `selector` 绑定控件，截图使用相对坐标 `rect: [x, y, width, height]`；`trigger: next` 保留为流程关系，不生成查看栏跳转按钮。手动拖线的 `fromSide / toSide` 保存所选端点方向，新增或改接连线不会覆盖已有端点。
 - `contextDefaults`：演示从页面直接进入时采用的默认条件。连线以 `setContext` 记录前面的选择，以 `when` 限定后续适用分支；共享页面无需让查看者重复选择。条件值使用字符串、布尔值或数字，编辑版和离线分享版采用同一规则。
 - 概览只画主要流程。通用导航 `navigation: true` 和非主要连线 `overview: false` 不画在画布上；页面内的取消、返回和重复切换仍保留，分享文件沿用相同展示规则。用户手动新建的连线默认显示。

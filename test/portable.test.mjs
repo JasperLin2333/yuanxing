@@ -85,6 +85,28 @@ test('CLI 从空目录建项目、导入现有 HTML、连接并导出，保护�
   await assert.rejects(run(['connect','--root',project,'--from','first','--to','second']),/可操作跳转/);
 });
 
+test('CLI 导出解析父目录链接，已有原型与尚不存在的后代目录均受保护',async t=>{
+  const dir=await temporary(t),project=path.join(dir,'project'),input=path.join(dir,'input.html'),alias=path.join(dir,'artifact-alias'),original='<h1>原型源</h1>';
+  await fs.writeFile(input,original);await run(['init',project]);await run(['add','--root',project,'--source',input,'--id','first']);
+  const artifact=path.join(project,'artifact'),modelFile=path.join(artifact,'workbench.json'),before=await fs.readFile(modelFile,'utf8');
+  await fs.symlink(artifact,alias,process.platform==='win32'?'junction':'dir');
+  await assert.rejects(run(['export','--root',project,'--out',path.join(alias,'pages/first.html'),'--replace']),/artifact/);
+  await assert.rejects(run(['export','--root',project,'--out',path.join(alias,'new/nested/share.html')]),/artifact/);
+  assert.equal(await fs.readFile(path.join(artifact,'pages/first.html'),'utf8'),original);assert.equal(await fs.readFile(modelFile,'utf8'),before);
+  await assert.rejects(fs.lstat(path.join(artifact,'new')),{code:'ENOENT'});
+  const output=path.join(dir,'delivery/new/share.html');await run(['export','--root',project,'--out',output]);assert((await fs.stat(output)).size>1000);
+});
+
+test('CLI 新增 HTML 和图片拒绝目录链接越界，外部文件与编排保持不变',async t=>{
+  const dir=await temporary(t),input=path.join(dir,'input.html'),image=path.join(dir,'input.png');await fs.writeFile(input,'<h1>原型</h1>');await fs.writeFile(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB','base64'));
+  for(const [folder,source] of [['pages',input],['assets',image]]){
+    const project=path.join(dir,'project-'+folder),outside=path.join(dir,'outside-'+folder);await run(['init',project]);await fs.mkdir(outside);await fs.writeFile(path.join(outside,'keep.txt'),'外部原文');
+    const modelFile=path.join(project,'artifact/workbench.json'),before=await fs.readFile(modelFile,'utf8');await fs.rmdir(path.join(project,'artifact',folder));await fs.symlink(outside,path.join(project,'artifact',folder),process.platform==='win32'?'junction':'dir');
+    await assert.rejects(run(['add','--root',project,'--source',source,'--id','added']),/越界/);
+    assert.deepEqual(await fs.readdir(outside),['keep.txt']);assert.equal(await fs.readFile(path.join(outside,'keep.txt'),'utf8'),'外部原文');assert.equal(await fs.readFile(modelFile,'utf8'),before);
+  }
+});
+
 test('本地 API 限制来源与会话令牌，不接受来自外部网页的写入',async t=>{
   const handler=createHandler(await createStore(await sample(t)),'test-token');
   async function request(host,authorization,origin){const req=Readable.from([JSON.stringify({})]);Object.assign(req,{method:'PUT',url:'/api/project',headers:{host,authorization,origin}});let status,body;await handler(req,{writeHead(value){status=value;},end(value){body=value;}});return{status,body};}
