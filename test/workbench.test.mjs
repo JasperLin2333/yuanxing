@@ -135,9 +135,9 @@ test('覆盖目标已变化、被删除或新图片无效时不改动任何节�
   const m=fixture();m.nodes[0].kind='image';m.nodes[0].path='assets/changed.png';const before=clone(m),image={path:'assets/new.png',width:600,height:800};
   assert.equal(replaceCanvasImage(m,'one',image,'assets/old.png'),false);assert.equal(replaceCanvasImage(m,'missing',image),false);assert.equal(replaceCanvasImage(m,'two',image),false);assert.equal(replaceCanvasImage(m,'one',{...image,path:'../new.png'}),false);assert.equal(replaceCanvasImage(m,'one',{...image,height:0}),false);assert.deepEqual(m,before);
 });
-test('回收站收纳隐藏原型、图片和说明，排除可见内容与分叉点',()=>{
+test('旧格式回收站保留普通隐藏内容，带代表页的内部状态不进入删除区',()=>{
   const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden-page',overview:false,overviewAlias:'one'},{...clone(m.nodes[1]),id:'hidden-image',kind:'image',overview:false},{...clone(m.nodes[2]),id:'hidden-note',overview:false},{...clone(m.nodes[2]),id:'hidden-branch',presentation:'branch',overview:false});
-  const before=clone(m);assert.deepEqual(recycleNodes(m).map(n=>n.id),['hidden-page','hidden-image','hidden-note']);assert.deepEqual(m,before);
+  const before=clone(m);assert.deepEqual(recycleNodes(m).map(n=>n.id),['hidden-image','hidden-note']);assert.deepEqual(m,before);
 });
 test('回收站角标与实际列表一致，85 个内部状态不计数，删除最后一项归零',()=>{
   const m=fixture();for(let i=0;i<85;i++)m.nodes.push({...clone(m.nodes[0]),id:'internal-'+i,overview:false,canvas:false});
@@ -158,7 +158,7 @@ test('回收站网格完整排列混合卡片，拖动只保存独立位置，�
   for(const n of recycleCanvasNodes(m))assert.deepEqual([n.x,n.y],positions.get(n.id));assert.deepEqual(validate(m),[]);
 });
 test('复制回收站内容在目标画布变为正常节点，保留原件、说明、图片和所选内部关系',()=>{
-  const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden-a',overview:false,overviewAlias:'one',description:'原页面说明'},{...clone(m.nodes[1]),id:'hidden-b',kind:'image',path:'assets/example.png',overview:false});m.edges.push({id:'hidden-link',from:'hidden-a',to:'hidden-b',label:'查看图片'});m.annotations.push({id:'hidden-pin',node:'hidden-a',point:[.1,.2],text:'原批注'});
+  const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden-a',deleted:true,overview:false,overviewAlias:'one',description:'原页面说明'},{...clone(m.nodes[1]),id:'hidden-b',kind:'image',path:'assets/example.png',deleted:true,overview:false});m.edges.push({id:'hidden-link',from:'hidden-a',to:'hidden-b',label:'查看图片'});m.annotations.push({id:'hidden-pin',node:'hidden-a',point:[.1,.2],text:'原批注'});
   const before=clone(m),clipboard=copyCanvasSelection(m,'a',['hidden-a','hidden-b'],{recycle:true});assert.equal(clipboard.nodes.length,2);assert(clipboard.nodes.every(n=>n.overview!==false&&!n.overviewAlias));assert.deepEqual(m,before);
   const ids=pasteCanvasSelection(m,'c',clipboard,[600,700]);assert.equal(ids.length,2);assert.deepEqual(m.nodes.slice(0,before.nodes.length),before.nodes);assert(ids.every(id=>moduleNodes(m,'c').some(n=>n.id===id)));
   assert.equal(m.nodes.find(n=>n.id===ids[0]).description,'原页面说明');assert.equal(m.nodes.find(n=>n.id===ids[1]).path,'assets/example.png');assert(m.edges.some(e=>e.from===ids[0]&&e.to===ids[1]));assert(m.annotations.some(a=>a.node===ids[0]&&a.text==='原批注'));assert.deepEqual(validate(m),[]);
@@ -169,7 +169,7 @@ test('剪切普通画布节点连同隐藏状态写入剪贴板，粘贴到另�
   assert.deepEqual(h.undo(m),before);const ids=pasteCanvasSelection(m,'b',clipboard,[800,1000]);assert.equal(ids.length,2);assert.equal(m.nodes.find(n=>n.id===ids[1]).overviewAlias,ids[0]);assert(m.edges.some(e=>e.from===ids[0]&&e.to===ids[1]&&e.selector==='#expand'));assert(m.annotations.some(a=>a.node===ids[1]&&a.text==='状态批注'));assert.deepEqual(validate(m),[]);
 });
 test('剪切回收站仅移走所选原件，其他状态与可见页面保留，粘贴后正常显示且可撤销',()=>{
-  const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden-a',overview:false,overviewAlias:'one'},{...clone(m.nodes[1]),id:'hidden-b',overview:false});m.annotations.push({id:'hidden-pin',node:'hidden-a',text:'原标记'});
+  const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden-a',deleted:true,overview:false,overviewAlias:'one'},{...clone(m.nodes[1]),id:'hidden-b',overview:false});m.annotations.push({id:'hidden-pin',node:'hidden-a',text:'原标记'});
   const before=clone(m),h=new History();h.push(m);const clipboard=cutCanvasSelection(m,'b',['hidden-a'],{recycle:true});assert.equal(clipboard.nodes.length,1);assert.deepEqual(m.nodes,before.nodes.filter(n=>n.id!=='hidden-a'));assert.equal(recycleNodes(m).length,1);assert.deepEqual(h.undo(m),before);
   const cut=clone(m),ids=pasteCanvasSelection(cut,'b',clipboard,[1000,700]);assert.equal(ids.length,1);assert(moduleNodes(cut,'b').some(n=>n.id===ids[0]));assert(cut.annotations.some(a=>a.node===ids[0]&&a.text==='原标记'));assert.deepEqual(validate(cut),[]);
 });
@@ -180,9 +180,9 @@ test('剪切页面不挪动其他页面或默认定位的跨模块引用',()=>{
   const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'keeper',x:800,y:600});m.nodes[0].x=3000;m.edges.push({id:'keep-two',from:'keeper',to:'two',label:'查看'},{id:'keep-note',from:'keeper',to:'unused',label:'说明'});
   const before=moduleNodes(m,'a').filter(n=>n.id!=='one').map(n=>({id:n.id,x:n.x,y:n.y}));cutCanvasSelection(m,'a',['one']);assert.deepEqual(moduleNodes(m,'a').map(n=>({id:n.id,x:n.x,y:n.y})),before);assert.deepEqual(validate(m),[]);
 });
-test('粘贴到回收站仍隐藏且独立摆放，不修改来源，非法位置拒绝保存',()=>{
+test('粘贴到回收站标为已删除并独立摆放，不修改来源，非法位置拒绝保存',()=>{
   const m=fixture();m.nodes.push({...clone(m.nodes[0]),id:'hidden',overview:false,overviewAlias:'one'});const before=clone(m),clipboard=copyCanvasSelection(m,'a',['one']),ids=pasteCanvasSelection(m,'b',clipboard,[1400,-500],{recycle:true});assert.equal(ids.length,2);assert.deepEqual(m.nodes.slice(0,before.nodes.length),before.nodes);
-  assert(ids.every(id=>recycleCanvasNodes(m).some(n=>n.id===id&&n.overview===false&&!n.overviewAlias)));assert(!moduleNodes(m,'a').some(n=>ids.includes(n.id)));assert.deepEqual(validate(m),[]);m.recyclePositions[ids[0]].x=Infinity;assert(validate(m).includes('回收站画布位置不正确'));
+  assert(ids.every(id=>recycleCanvasNodes(m).some(n=>n.id===id&&n.deleted===true&&!n.overviewAlias)));assert(!moduleNodes(m,'a').some(n=>ids.includes(n.id)));assert.deepEqual(validate(m),[]);m.recyclePositions[ids[0]].x=Infinity;assert(validate(m).includes('回收站画布位置不正确'));
 });
 async function temporary(fn){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'ec-yuanxing-'));try{return await fn(dir);}finally{await fs.rm(dir,{recursive:true,force:true});}}
 test('历史编组不会随复制或粘贴重新带回，页面仍可临时多选复制',()=>{

@@ -29,9 +29,9 @@ node "<Skill目录>/scripts/yuanxing.mjs" open --root "<项目目录>" --reuse
 每个项目的 `artifact/workbench.json` 是模块编排、连线和批注的编辑来源。页面和图片路径均相对 `artifact`，没有该文件时可导入已有 `manifest.json` 的页面、转移和说明。
 
 - `modules`：稳定的模块标识、标题及画布分区；`sections` 按讲解顺序定义模块内分区，节点通过 `section` 归属。目录顺序和画布分区使用同一配置。
-- `nodes`：稳定状态标识、所属模块、类型（`html / image / note`）、原始画布尺寸、位置、页面说明及资源路径；可用 `canvasType: pc / mobile` 指定卡片类型，只影响画布展示，不改变原始尺寸。仍需播放但不占画布的内部状态使用 `canvas: false`，导出时保留；同时设置 `overview: false` 可从目录隐藏。仅设置 `overview: false` 的普通节点进入回收站，导出时会排除该节点及其关联连线，不能用来保留离线交互状态。
+- `nodes`：稳定状态标识、所属模块、类型（`html / image / note`）、原始画布尺寸、位置、页面说明及资源路径；可用 `canvasType: pc / mobile` 指定卡片类型，只影响画布展示，不改变原始尺寸。新编排以 `nodeStateVersion: 1` 区分展示与删除：`canvas: false` 隐藏画布卡片，`overview: false` 隐藏概览和目录；只有 `deleted: true` 记录删除，从播放及离线导出中排除，普通页面和说明可在回收站查看。旧编排的兼容规则见[项目格式](project-format.md#页面与画布)，不再用隐藏字段表达新的删除操作。
 - 条件分叉使用 `kind: note, presentation: branch` 保存线上的共用分叉点；画布只显示连接点，条件名称标在线上，不作为页面卡片。`diagram: true` 连线只表达画布层级；原产品交互通过 `canvasFrom` 挂到线组时仍保留原页面及按钮绑定。
-- 同一页面的重复状态在保留为内部状态后，可用 `overviewAlias` 指向一个可见节点，概览连线合并到该节点；实际页面仍展示各自状态，避免重复画下拉菜单或表单。`overviewAlias` 不代替用于保留播放与导出的 `canvas: false`。
+- 同一页面的重复状态可用 `overviewAlias` 指向一个可见节点，概览连线合并到该节点；实际页面仍展示各自状态，避免重复画下拉菜单或表单。别名只表达展示归并，不改变节点的删除状态。
 - `edges`：来源状态、目标状态、操作名称、分支条件和说明。HTML 使用 `selector` 绑定控件，截图使用相对坐标 `rect: [x, y, width, height]`；`trigger: next` 保留为流程关系，不生成查看栏跳转按钮。手动拖线的 `fromSide / toSide` 保存所选端点方向，新增或改接连线不会覆盖已有端点。
 - `contextDefaults`：演示从页面直接进入时采用的默认条件。连线以 `setContext` 记录前面的选择，以 `when` 限定后续适用分支；共享页面无需让查看者重复选择。条件值使用字符串、布尔值或数字，编辑版和离线分享版采用同一规则。
 - 概览只画主要流程。通用导航 `navigation: true` 和非主要连线 `overview: false` 不画在画布上；页面内的取消、返回和重复切换仍保留，分享文件沿用相同展示规则。用户手动新建的连线默认显示。

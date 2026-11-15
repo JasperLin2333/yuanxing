@@ -12,7 +12,7 @@ function fixture(){
   const image='data:image/png;base64,'+randomBytes(64000).toString('base64');
   const style='<style>/* 公共样式 😀 */'+'.row{display:flex;color:#135;color:var(--tone)}\n'.repeat(200)+'</style>';
   const content='<section>'+Array.from({length:80},(_,i)=>`<div class="row" data-row="${i}">客户 ${i}：已确认 &amp; 保留原文</div>`).join('')+'</section>';
-  const model={version:1,title:'大文件导出',modules:[{id:'main',title:'客户',entry:'one'}],nodes:['one','two'].map(id=>({id,module:'main',kind:'html',path:`pages/${id}.html`,title:id,width:1280,height:800,x:0,y:0})),edges:[{id:'next',from:'one',to:'two',selector:'#next',label:'继续'}],annotations:[]};
+  const model={version:1,nodeStateVersion:1,title:'大文件导出',modules:[{id:'main',title:'客户',entry:'one'}],nodes:['one','two'].map(id=>({id,module:'main',kind:'html',path:`pages/${id}.html`,title:id,width:1280,height:800,x:0,y:0})),edges:[{id:'next',from:'one',to:'two',selector:'#next',label:'继续'}],annotations:[]};
   const page=id=>`<!doctype html><html><head><!-- include:style --></head><body><main><img src="${image}">${content}<button id="next" onclick="this.textContent='已选择'">继续 ${id}</button><script>const literal='</script-safe> 😀 &quot;';</script></main></body></html>`;
   return {model,resources:{one:page('一'),two:page('二')},fragments:{style},images:{},documentSources:{}};
 }

@@ -1,6 +1,8 @@
 // 编辑端、离线分享端与校验共用的数据操作。
 import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty} from './routing.mjs';
 import {validateDocument,pruneDocument,documentAssetPaths,walkDocument} from './document.mjs';
+import {isDeletedNode,upgradeNodeState,migrateNodeState} from './node-state.mjs';
+export {isDeletedNode,migrateNodeState} from './node-state.mjs';
 export const clone = value => JSON.parse(JSON.stringify(value));
 export function offlineExportHTML(html,view){
   if(!['review','document','prototype'].includes(view))throw new Error('导出视图不正确');
@@ -185,12 +187,12 @@ export function nudgeCanvasNodes(model,moduleId,ids,dx,dy){
 }
 export function copyCanvasSelection(model,moduleId,ids,{recycle=false}={}){
   const wanted=new Set(ids),visible=(recycle?recycleCanvasNodes(model):moduleNodes(model,moduleId)).filter(n=>wanted.has(n.id));if(!visible.length)return {nodes:[],edges:[],annotations:[],rules:{}};
-  const visibleById=new Map(visible.map(n=>[n.id,n])),hidden=recycle?[]:model.nodes.filter(n=>n.overview===false&&visibleById.has(n.overviewAlias)).map(n=>({...n,x:visibleById.get(n.overviewAlias).x,y:visibleById.get(n.overviewAlias).y})),nodes=[...visible,...hidden];
+  const visibleById=new Map(visible.map(n=>[n.id,n])),hidden=recycle?[]:model.nodes.filter(n=>!isDeletedNode(model,n)&&n.overview===false&&visibleById.has(n.overviewAlias)).map(n=>({...n,x:visibleById.get(n.overviewAlias).x,y:visibleById.get(n.overviewAlias).y})),nodes=[...visible,...hidden];
   const selected=new Set(nodes.map(n=>n.id)),origin=[Math.min(...visible.map(n=>n.x)),Math.min(...visible.map(n=>n.y))],shift=point=>[point[0]-origin[0],point[1]-origin[1]];
   // 复制真实状态链，不用概览中的代表页面替换按钮和分支目标。
   const edges=model.edges.filter(e=>!e.navigation&&selected.has(e.from)&&selected.has(e.to)).map(e=>{const edge=clone(e);if(edge.canvasFrom&&!selected.has(edge.canvasFrom))delete edge.canvasFrom;if(recycle){delete edge.waypoints;delete edge.labelPosition;}else{if(edge.waypoints)edge.waypoints=edge.waypoints.map(shift);if(edge.labelPosition)edge.labelPosition=shift(edge.labelPosition);}return edge;});
   const edgeIds=new Set(edges.map(e=>e.id)),annotations=clone(model.annotations.filter(a=>a.edge?edgeIds.has(a.edge):selected.has(a.node))),used=new Set([...nodes,...edges].map(item=>item.rule).filter(Boolean));
-  return {nodes:nodes.map(n=>{const copy=clone(n);copy.x-=origin[0];copy.y-=origin[1];delete copy.reference;if(recycle){delete copy.overview;delete copy.overviewAlias;}else if(copy.overviewAlias&&!selected.has(copy.overviewAlias))delete copy.overviewAlias;return copy;}),edges,annotations,rules:Object.fromEntries([...used].filter(id=>typeof model.rules?.[id]==='string').map(id=>[id,model.rules[id]]))};
+  return {nodeStateVersion:1,nodes:nodes.map(n=>{const copy=clone(n);copy.x-=origin[0];copy.y-=origin[1];delete copy.reference;if(recycle){delete copy.deleted;delete copy.canvas;delete copy.overview;delete copy.overviewAlias;}else if(copy.overviewAlias&&!selected.has(copy.overviewAlias))delete copy.overviewAlias;return copy;}),edges,annotations,rules:Object.fromEntries([...used].filter(id=>typeof model.rules?.[id]==='string').map(id=>[id,model.rules[id]]))};
 }
 export function canvasClipboardAssets(clipboard,bundle){
   const resources={},fragments={},images={};
@@ -214,7 +216,8 @@ export function cutCanvasSelection(model,moduleId,ids,{recycle=false}={}){
 }
 export function pasteCanvasSelection(model,moduleId,clipboard,point=[80,80],{recycle=false}={}){
   if(!model.modules.some(m=>m.id===moduleId)||!Array.isArray(clipboard?.nodes)||!clipboard.nodes.length)return [];
-  const source=clone(clipboard),coordinates=Array.isArray(point)?point:[point?.x,point?.y],origin=coordinates.every(Number.isFinite)?coordinates:[80,80],nodeIds=new Map(source.nodes.map(n=>[n.id,uid(isBranch(n)?'branch':'node')])),edgeIds=new Map(),rules=new Map();
+  upgradeNodeState(model);
+  const source=migrateNodeState(clipboard),coordinates=Array.isArray(point)?point:[point?.x,point?.y],origin=coordinates.every(Number.isFinite)?coordinates:[80,80],nodeIds=new Map(source.nodes.map(n=>[n.id,uid(isBranch(n)?'branch':'node')])),edgeIds=new Map(),rules=new Map();
   model.rules??={};for(const [id,text] of Object.entries(source.rules||{})){if(typeof text!=='string')continue;const next=uid('rule');rules.set(id,next);model.rules[next]=text;}
   const remapRule=item=>{if(item.rule){if(rules.has(item.rule))item.rule=rules.get(item.rule);else delete item.rule;}},shift=([x,y])=>[x+origin[0],y+origin[1]];
   if(recycle)moveRecycleNodes(model,[]);
@@ -224,13 +227,13 @@ export function pasteCanvasSelection(model,moduleId,clipboard,point=[80,80],{rec
     if(next.kind==='html'&&source.imported){delete next.copySourcePath;delete next.render;delete next.sources;}
     else if(next.kind==='html'&&next.render&&/^canvas-states\/[\w-]+\.html$/.test(next.path)){next.path=`canvas-states/${next.id}.html`;delete next.copySourcePath;}
     else if(next.kind==='html'&&!next.render){next.copySourcePath=next.path;const slash=next.path.lastIndexOf('/');next.path=(slash<0?'':next.path.slice(0,slash+1))+next.id+'.html';}
-    if(recycle){next.overview=false;delete next.overviewAlias;model.recyclePositions??={};model.recyclePositions[next.id]={x:next.x,y:next.y};}
+    if(recycle){next.deleted=true;delete next.overviewAlias;model.recyclePositions??={};model.recyclePositions[next.id]={x:next.x,y:next.y};}
     remapRule(next);return next;
   });
   const edges=(source.edges||[]).filter(e=>nodeIds.has(e.from)&&nodeIds.has(e.to)).map(e=>{const id=uid('edge');edgeIds.set(e.id,id);const next={...e,id,from:nodeIds.get(e.from),to:nodeIds.get(e.to)};if(next.canvasFrom){if(nodeIds.has(next.canvasFrom))next.canvasFrom=nodeIds.get(next.canvasFrom);else delete next.canvasFrom;}if(next.waypoints)next.waypoints=next.waypoints.map(shift);if(next.labelPosition)next.labelPosition=shift(next.labelPosition);remapRule(next);return next;});
   const annotations=(source.annotations||[]).filter(a=>a.edge?edgeIds.has(a.edge):nodeIds.has(a.node)).map(a=>{const next={...a,id:uid('annotation')};if(next.node)next.node=nodeIds.get(next.node);if(next.edge)next.edge=edgeIds.get(next.edge);return next;});
   model.nodes.push(...nodes);model.edges.push(...edges);model.annotations.push(...annotations);
-  const module=model.modules.find(m=>m.id===moduleId);module.entry??=nodes.find(n=>n.overview!==false&&!isBranch(n))?.id;return nodes.map(n=>n.id);
+  const module=model.modules.find(m=>m.id===moduleId);module.entry??=nodes.find(n=>!isDeletedNode(model,n)&&n.overview!==false&&!isBranch(n))?.id;return nodes.map(n=>n.id);
 }
 export function reconnectEdge(model,id,endpoint,nodeId,side,fixedSide) {
   const edge=model.edges.find(e=>e.id===id),destination=model.nodes.find(n=>n.id===nodeId);
@@ -276,7 +279,7 @@ export function createLineBranch(model,edgeId,targetId,point,targetSide='top',ro
 }
 export function orderedModuleNodes(model,moduleId){
   const sections=model.modules.find(m=>m.id===moduleId)?.sections||[],rank=new Map(sections.map((s,i)=>[s.id,i]));
-  return model.nodes.filter(n=>n.module===moduleId&&n.overview!==false&&!isBranch(n)).sort((a,b)=>(rank.get(a.section)??sections.length)-(rank.get(b.section)??sections.length)||a.y-b.y||a.x-b.x);
+  return model.nodes.filter(n=>n.module===moduleId&&!isDeletedNode(model,n)&&n.overview!==false&&!isBranch(n)).sort((a,b)=>(rank.get(a.section)??sections.length)-(rank.get(b.section)??sections.length)||a.y-b.y||a.x-b.x);
 }
 export function canvasSections(model,moduleId){
   const nodes=orderedModuleNodes(model,moduleId),sections=model.modules.find(m=>m.id===moduleId)?.sections||[];
@@ -405,7 +408,7 @@ export function restoreView(model,saved) {
   if(!saved||typeof saved!=='object')return null;
   const validCamera=value=>value&&[value.x,value.y,value.scale].every(Number.isFinite)&&value.scale>0&&value.scale<=4;
   const moduleId=model.modules.some(m=>m.id===saved.moduleId)?saved.moduleId:model.entryModule||model.modules[0]?.id;
-  const current=model.nodes.some(n=>n.id===saved.current&&!isBranch(n))?saved.current:null;
+  const current=model.nodes.some(n=>n.id===saved.current&&!isDeletedNode(model,n)&&!isBranch(n))?saved.current:null;
   return {moduleId,current,camera:validCamera(saved.camera)&&moduleId===saved.moduleId?saved.camera:null,cameras:Object.fromEntries(model.modules.filter(m=>validCamera(saved.cameras?.[m.id])).map(m=>[m.id,saved.cameras[m.id]])),flowContext:isFlowContext(saved.flowContext)?saved.flowContext:clone(model.contextDefaults||{}),linesHidden:saved.linesHidden===true,view:['review','document','prototype'].includes(saved.view)?saved.view:null,activeFlow:typeof saved.activeFlow==='string'?saved.activeFlow:null,documentPosition:saved.documentPosition&&typeof saved.documentPosition==='object'?saved.documentPosition:null};
 }
 export const isImagePath = value => typeof value==='string' && /^assets\/[^?#\\\u0000-\u001f]+\.(png|jpe?g|webp)$/i.test(value) && value.split('/').every(part=>part&&part!=='.'&&part!=='..');
@@ -430,6 +433,7 @@ export function expandHTML(text, fragments, trail=[]) {
 export function validate(model) {
   const errors = [], ids = new Set(), modules = new Set();
   if (model.version !== 1 || !Array.isArray(model.modules) || !Array.isArray(model.nodes) || !Array.isArray(model.edges) || !Array.isArray(model.annotations)) return ['工作台数据格式不正确'];
+  if(model.nodeStateVersion!==undefined&&model.nodeStateVersion!==1)errors.push('节点状态版本不支持');
   if(model.contextDefaults!==undefined&&!isFlowContext(model.contextDefaults))errors.push('流程默认条件不正确');
   if(model.updates!==undefined){
     const seen=new Set();
@@ -453,6 +457,7 @@ export function validate(model) {
     if(n.summary!==undefined&&typeof n.summary!=='string')errors.push(`页面核心说明不正确：${n.title}`);
     if(n.canvas!==undefined&&typeof n.canvas!=='boolean')errors.push(`页面画布设置不正确：${n.title}`);
     if(n.overview!==undefined&&typeof n.overview!=='boolean')errors.push(`页面概览设置不正确：${n.title}`);
+    if(n.deleted!==undefined&&typeof n.deleted!=='boolean')errors.push(`页面删除状态不正确：${n.title}`);
     if(n.presentation!==undefined&&(n.presentation!=='branch'||n.kind!=='note'))errors.push(`分支节点格式不正确：${n.title}`);
     if(n.section&&!model.modules.find(m=>m.id===n.module)?.sections?.some(s=>s.id===n.section))errors.push(`页面分区不存在：${n.title}`);
     if (n.kind !== 'note' && (typeof n.path !== 'string' || /(^\/|\\|(^|\/)\.\.(\/|$)|^\w+:)/.test(n.path))) errors.push(`资源路径不正确：${n.title}`);
@@ -493,9 +498,10 @@ export function validate(model) {
   return errors;
 }
 export function overviewEdges(model) {
-  const visible=new Set(model.nodes.filter(n=>n.overview!==false&&n.canvas!==false).map(n=>n.id));
+  const visible=new Set(model.nodes.filter(n=>!isDeletedNode(model,n)&&n.overview!==false&&n.canvas!==false).map(n=>n.id));
   const aliases=new Map(model.nodes.filter(n=>n.overviewAlias).map(n=>[n.id,n.overviewAlias]));
-  return model.edges.filter(e=>!e.navigation&&e.overview!==false).map(e=>e.canvasFrom||aliases.has(e.from)||aliases.has(e.to)?{...e,from:e.canvasFrom||aliases.get(e.from)||e.from,to:aliases.get(e.to)||e.to}:e).filter(e=>e.from!==e.to&&visible.has(e.from)&&visible.has(e.to));
+  const active=new Set(model.nodes.filter(n=>!isDeletedNode(model,n)).map(n=>n.id));
+  return model.edges.filter(e=>!e.navigation&&e.overview!==false&&active.has(e.from)&&active.has(e.to)&&(!e.canvasFrom||active.has(e.canvasFrom))).map(e=>e.canvasFrom||aliases.has(e.from)||aliases.has(e.to)?{...e,from:e.canvasFrom||aliases.get(e.from)||e.from,to:aliases.get(e.to)||e.to}:e).filter(e=>e.from!==e.to&&visible.has(e.from)&&visible.has(e.to));
 }
 function dropConnections(model,ids) {
   const removed=new Set(ids);
@@ -576,16 +582,16 @@ export function compactCanvas(model,moduleId) {
     }
   }
 }
-export function removeNodes(model,ids) {
+export function removeNodes(model,ids,{dissolveBranches=true}={}) {
   const removed=new Set(ids);
-  for(const id of ids)if(isBranch(model.nodes.find(n=>n.id===id))){dissolveBranch(model,id);removed.delete(id);}
+  for(const id of ids)if(dissolveBranches&&isBranch(model.nodes.find(n=>n.id===id))){dissolveBranch(model,id);removed.delete(id);}
   dropConnections(model,model.edges.filter(e=>removed.has(e.from)||removed.has(e.to)||removed.has(e.canvasFrom)).map(e=>e.id));
   model.annotations=model.annotations.filter(a=>!removed.has(a.node));model.nodes=model.nodes.filter(n=>!removed.has(n.id));
   for(const n of model.nodes)if(removed.has(n.overviewAlias))delete n.overviewAlias;
   for(const positions of Object.values(model.referencePositions||{}))for(const id of removed)delete positions[id];
   for(const id of removed)if(model.recyclePositions)delete model.recyclePositions[id];
   if(model.groups)model.groups=model.groups.map(group=>({...group,nodes:group.nodes.filter(id=>!removed.has(id))})).filter(group=>group.nodes.length>1);
-  for(const module of model.modules)if(removed.has(module.entry)){const entry=model.nodes.find(n=>n.module===module.id&&n.overview!==false&&!isBranch(n))?.id;if(entry)module.entry=entry;else delete module.entry;}
+  for(const module of model.modules)if(removed.has(module.entry)){const entry=model.nodes.find(n=>n.module===module.id&&!isDeletedNode(model,n)&&n.overview!==false&&!isBranch(n))?.id;if(entry)module.entry=entry;else delete module.entry;}
   for(const field of ["flows","experiences"])if(model[field])model[field]=model[field].filter(flow=>model.nodes.some(n=>n.id===flow.entry));
   for(const module of model.modules)if(module.entry&&!model.nodes.some(n=>n.id===module.entry))delete module.entry;
   normalizeBranchJunctions(model);
@@ -601,14 +607,14 @@ export function removeCanvasNodes(model,moduleId,ids){
   removeNodes(model,model.nodes.filter(n=>n.module===moduleId&&selected.has(n.id)).map(n=>n.id));
 }
 export function moduleNodes(model, moduleId) {
-  const own = model.nodes.filter(n => n.module === moduleId&&n.overview!==false&&n.canvas!==false), ownIds = new Set(own.map(n=>n.id));
+  const own = model.nodes.filter(n => n.module === moduleId&&!isDeletedNode(model,n)&&n.overview!==false&&n.canvas!==false), ownIds = new Set(own.map(n=>n.id));
   const refs = [...new Set(overviewEdges(model).filter(e=>ownIds.has(e.from) && !ownIds.has(e.to)).map(e=>e.to))];
   let y=60;const x=Math.max(500,...own.map(n=>n.x+canvasNodeWidth(n)+80));
   return [...own, ...refs.map(id=>{const n=model.nodes.find(n=>n.id===id),position=model.referencePositions?.[moduleId]?.[id],r={...n,x:position?.x??x,y:position?.y??y,reference:true};y+=canvasNodeHeight(n)+70;return r;})];
 }
 export function recycleNodes(model){
   const rank=new Map(model.modules.map((m,i)=>[m.id,i]));
-  return model.nodes.filter(n=>n.overview===false&&n.canvas!==false&&!isBranch(n)&&rank.has(n.module)).sort((a,b)=>rank.get(a.module)-rank.get(b.module)||(a.y||0)-(b.y||0)||(a.x||0)-(b.x||0));
+  return model.nodes.filter(n=>isDeletedNode(model,n)&&!isBranch(n)&&rank.has(n.module)).sort((a,b)=>rank.get(a.module)-rank.get(b.module)||(a.y||0)-(b.y||0)||(a.x||0)-(b.x||0));
 }
 export function recycleCanvasNodes(model){
   const nodes=recycleNodes(model),result=[];let y=60;
@@ -788,7 +794,7 @@ export function readDescription(root) {
   return children(root).replace(/\n{3,}/g,'\n\n').trim();
 }
 export function importManifest(manifest) {
-  const model={version:1,title:'原型工作台',modules:[],nodes:[],edges:[],annotations:[]};
+  const model={version:1,nodeStateVersion:1,title:'原型工作台',modules:[],nodes:[],edges:[],annotations:[]};
   for(const r of manifest.requirements||[]) {
     model.modules.push({id:r.id,title:r.title,entry:`${r.id}:${(r.states.find(s=>s.initial)||r.states[0]).id}`});
     r.states.forEach((s,i)=>model.nodes.push({id:`${r.id}:${s.id}`,module:r.id,title:s.desc||s.id,kind:'html',path:s.html,width:1280,height:800,x:60,y:60+i*360,description:s.desc||''}));
@@ -800,6 +806,7 @@ export function importManifest(manifest) {
 
 // 按共同基线合并；有标识的列表逐项、逐字段处理，坐标数组与正文保持整体。
 export function mergeProject(base,local,remote,{prefer='local'}={}){
+  if([base,local,remote].some(model=>model?.nodeStateVersion!==undefined)){base=migrateNodeState(base);local=migrateNodeState(local);remote=migrateNodeState(remote);}
   const conflicts=[],equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b),copy=value=>value===undefined?undefined:clone(value);
   const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
   function merge(b,l,r,path){

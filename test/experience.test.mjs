@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
 import vm from 'node:vm';
-import {mergeProject} from '../runtime/core.mjs';
+import {isDeletedNode,mergeProject} from '../runtime/core.mjs';
 const app=await fs.readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8');
 const player=await fs.readFile(new URL('../runtime/player.mjs',import.meta.url),'utf8');
 const entries=app.includes('function flowEntries(model){')?app.slice(app.indexOf('function flowEntries(model){'),app.indexOf('function renderExperience(){')):player.slice(player.indexOf('export function flowEntries('),player.indexOf('export function thumbnailHTML(')).replaceAll('export ','');
@@ -12,7 +12,7 @@ function setup(originalReadonly=false){
   const elements=new Map(),classes=new Set(),stored=[];
   const element=()=>({hidden:false,disabled:false,attrs:{},dataset:{},children:[],replaceChildren(){this.children=[];},append(child){this.children.push(child);},setAttribute(key,value){this.attrs[key]=value;},focus(){},scrollTop:90,scrollLeft:30});
   const $=selector=>{if(!elements.has(selector))elements.set(selector,element());return elements.get(selector);};
-  const state={apiBase:"",clone,cleanContext:value=>clone(value||{}),$,experienceSelect:{setOptions(options){state.flowOptions=options;},setValue(value){state.selectedFlow=value;}},originalReadonly,readonly:originalReadonly,experience:false,documentMode:false,documentView:{leave(){},capturePosition:()=>null},experienceReturn:null,activeFlow:null,activeCanvasGesture:null,cancelConnection:null,
+  const state={isDeletedNode,apiBase:"",clone,cleanContext:value=>clone(value||{}),$,experienceSelect:{setOptions(options){state.flowOptions=options;},setValue(value){state.selectedFlow=value;}},originalReadonly,readonly:originalReadonly,experience:false,documentMode:false,documentView:{leave(){},capturePosition:()=>null},experienceReturn:null,activeFlow:null,activeCanvasGesture:null,cancelConnection:null,
     model:{title:'项目',contextDefaults:{role:'admin'},modules:[{id:'a',title:'模块甲',entry:'one'},{id:'b',title:'模块乙',entry:'two'}],nodes:[{id:'one',module:'a',kind:'html'},{id:'two',module:'b',kind:'image'}],flows:[{id:'first',title:'第一条流程',entry:'one'},{id:'second',title:'第二条流程',entry:'two',context:{role:'member'}}]},
     moduleId:'a',current:null,recycleOpen:false,camera:{x:-123,y:234,scale:.63},cameras:{},selected:{type:'node',id:'one'},flowContext:{before:'keep'},mode:null,linkCaptureTarget:null,
     viewReady:true,linesHidden:false,location:{pathname:'/'},localStorage:{setItem(key,value){stored.push({key,value});}},

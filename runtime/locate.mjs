@@ -1,5 +1,6 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
+import {migrateNodeState,isDeletedNode} from './node-state.mjs';
 import {safePath} from './paths.mjs';
 import {walkDocument,extractDocumentSource} from './document.mjs';
 
@@ -7,17 +8,17 @@ import {walkDocument,extractDocumentSource} from './document.mjs';
 export async function locateProject(root,{query='',module,limit=6}={}) {
   if(!Number.isInteger(limit)||limit<1||limit>30)throw new Error('定位结果数量应为 1～30');
   root=await fs.realpath(root);
-  const model=JSON.parse(await fs.readFile(await safePath(root,'artifact/workbench.json'),'utf8'));
+  const model=migrateNodeState(JSON.parse(await fs.readFile(await safePath(root,'artifact/workbench.json'),'utf8')));
   if(!Array.isArray(model.modules)||!Array.isArray(model.nodes))throw new Error('工作台数据格式不正确');
   if(module&&!model.modules.some(item=>item.id===module))throw new Error('模块不存在');
   const normalize=text=>String(text||'').normalize('NFKC').toLowerCase(),terms=normalize(query).trim().split(/\s+/).filter(Boolean);
   const matches=text=>terms.every(term=>normalize(text).includes(term));
   const modules=new Map(model.modules.map(item=>[item.id,item]));
-  if(!terms.length&&!module)return {title:model.title,modules:model.modules.map(item=>({id:item.id,title:item.title,pages:model.nodes.filter(node=>node.module===item.id).length}))};
+  if(!terms.length&&!module)return {title:model.title,modules:model.modules.map(item=>({id:item.id,title:item.title,pages:model.nodes.filter(node=>!isDeletedNode(model,node)&&node.module===item.id).length}))};
   const blocks=[];walkDocument(model.document?.blocks,block=>blocks.push(block));
   const sectionNodes=new Set();
   for(const block of blocks)if(terms.length&&block.type==='source'&&matches(block.section))for(const id of block.nodes||[])sectionNodes.add(id);
-  const candidates=model.nodes.filter(node=>!module||node.module===module);
+  const candidates=model.nodes.filter(node=>!isDeletedNode(model,node)&&(!module||node.module===module));
   const matchesName=node=>!terms.length||sectionNodes.has(node.id)||matches([node.id,node.title,node.module,modules.get(node.module)?.title].join(' '));
   const matchesDescription=node=>terms.length&&matches([node.summary,node.description,model.rules?.[node.rule]].join(' '));
   const found=candidates.filter(node=>matchesName(node)||matchesDescription(node));

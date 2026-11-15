@@ -66,7 +66,7 @@ test('精简结果保留页面、去重编辑源及正文行号，不输出渲�
 test('help、locate 和空项目创建脱离服务与布线引擎运行，--json 保留结构化输出',async t=>{
   const {root}=await fixture(t),minimal=await fs.mkdtemp(path.join(os.tmpdir(),'yuanxing-light-cli-'));t.after(()=>fs.rm(minimal,{recursive:true,force:true}));
   const source=fileURLToPath(new URL('../',import.meta.url));
-  for(const relative of ['scripts/yuanxing.mjs','runtime/locate.mjs','runtime/document.mjs','runtime/paths.mjs']){const target=path.join(minimal,relative);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(source,relative),target);}
+  for(const relative of ['scripts/yuanxing.mjs','runtime/locate.mjs','runtime/node-state.mjs','runtime/document.mjs','runtime/paths.mjs']){const target=path.join(minimal,relative);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(source,relative),target);}
   const cli=path.join(minimal,'scripts/yuanxing.mjs');
   for(const args of [['help'],['locate','--root',root,'--query','assign'],['init',path.join(minimal,'new-project')]]){
     const result=spawnSync(process.execPath,[cli,...args],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert(result.stdout.trim());

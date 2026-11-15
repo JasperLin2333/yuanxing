@@ -13,7 +13,7 @@ import {launchIdentity} from './launcher.mjs';
 import {safePath} from './paths.mjs';
 export {safePath} from './paths.mjs';
 import {documentSourceBlocks,documentSourceKey,extractDocumentSource,patchDocumentSource,walkDocument} from './document.mjs';
-import {clone,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,recycleNodes,removeNodes,mergeProject} from './core.mjs';
+import {clone,migrateNodeState,isDeletedNode,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,removeNodes,mergeProject} from './core.mjs';
 const exec=promisify(execFile),tool=path.dirname(fileURLToPath(import.meta.url));
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const inside=(root,target)=>target===root||target.startsWith(root+path.sep);
@@ -81,7 +81,7 @@ function assertClipboardHTML(text,label){
 export async function createStore(root,{builder,validator,extension}={}){
   const projectExtension=await loadProjectExtension(extension);
   root=await fs.realpath(root);const artifact=await fs.realpath(path.join(root,'artifact')),modelFile=path.join(artifact,'workbench.json');if(!inside(root,artifact))throw new Error('artifact 目录越界');let building,buildSig,queue=Promise.resolve(),validationSig,validationFlight;
-  async function readModel(){try{const raw=await fs.readFile(await safePath(artifact,'workbench.json'),'utf8');return {model:JSON.parse(raw),revision:sha(raw)};}catch(error){if(error.code!=='ENOENT')throw error;const manifest=JSON.parse(await fs.readFile(await safePath(artifact,'manifest.json'),'utf8'));const model=importManifest(manifest);for(const r of manifest.requirements||[])for(const s of r.states||[]){const html=await fs.readFile(await safePath(artifact,s.html),'utf8');for(const t of r.transitions||[])if(html.includes(`data-transition-id="${t.id}"`))model.edges.push({id:`${r.id}:${s.id}:${t.id}`,from:`${r.id}:${s.id}`,to:`${r.id}:${t.to}`,label:t.id,selector:`[data-transition-id="${t.id}"]`});}return {model,revision:'import'};}}
+  async function readModel(){try{const raw=await fs.readFile(await safePath(artifact,'workbench.json'),'utf8');return {model:migrateNodeState(JSON.parse(raw)),revision:sha(raw)};}catch(error){if(error.code!=='ENOENT')throw error;const manifest=JSON.parse(await fs.readFile(await safePath(artifact,'manifest.json'),'utf8'));const model=importManifest(manifest);for(const r of manifest.requirements||[])for(const s of r.states||[]){const html=await fs.readFile(await safePath(artifact,s.html),'utf8');for(const t of r.transitions||[])if(html.includes(`data-transition-id="${t.id}"`))model.edges.push({id:`${r.id}:${s.id}:${t.id}`,from:`${r.id}:${s.id}`,to:`${r.id}:${t.to}`,label:t.id,selector:`[data-transition-id="${t.id}"]`});}return {model,revision:'import'};}}
   const renderInputs=model=>model.nodes.filter(n=>n.kind!=='note').map(n=>({id:n.id,path:n.path,render:n.render}));
   // 同一份构建输入同时用于失效判断和轻量资源版本，包含同目录辅助脚本及参考图片。
   async function buildInputs(model){return sha(JSON.stringify([renderInputs(model),await Promise.all([...(builder?[path.dirname(await safePath(root,builder))]:[]),...['components','modules','assets'].map(dir=>path.join(artifact,dir)),...(projectExtension?[projectExtension.root]:[])].map(fingerprint))]));}
@@ -149,7 +149,7 @@ export async function createStore(root,{builder,validator,extension}={}){
       return await operation();
     }finally{await lock.close();await fs.rm(modelFile+'.lock',{force:true});}
   });}
-  async function save(model,revision,baseModel){assertModel(model);return withProjectLock(async()=>{
+  async function save(model,revision,baseModel){model=migrateNodeState(model);if(baseModel)baseModel=migrateNodeState(baseModel);assertModel(model);return withProjectLock(async()=>{
       const actual=await readModel();let next=model;
       if(actual.revision!==revision){
         if(!baseModel)assertRevision(actual,revision,true);
@@ -199,7 +199,7 @@ export async function createStore(root,{builder,validator,extension}={}){
   async function upload({type,data}){const allowed={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};if(!allowed[type]||typeof data!=='string'||!data.startsWith(`data:${type};base64,`))throw new Error('图片格式不支持');const bytes=Buffer.from(data.split(',')[1],'base64');const valid=type==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):type==='image/jpeg'?bytes[0]===255&&bytes[1]===216:bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP';if(!valid)throw new Error('图片内容不正确');await fs.mkdir(path.join(artifact,'assets'),{recursive:true});const relative=`assets/${randomUUID()}.${allowed[type]}`;await fs.writeFile(await safePath(artifact,relative,true),bytes,{flag:'wx'});return {path:relative};}
   async function importClipboard(input){
     if(!input||!Array.isArray(input.nodes)||!input.nodes.length)throw new Error('复制内容为空');
-    const copy=clone(input),candidate={version:1,title:'复制内容',modules:[{id:'clipboard',title:'复制内容'}],nodes:copy.nodes.map(n=>{const next={...n,module:'clipboard'};delete next.section;return next;}),edges:copy.edges||[],annotations:copy.annotations||[],rules:copy.rules||{}};
+    const copy=migrateNodeState(input),candidate={version:1,nodeStateVersion:copy.nodeStateVersion,title:'复制内容',modules:[{id:'clipboard',title:'复制内容'}],nodes:copy.nodes.map(n=>{const next={...n,module:'clipboard'};delete next.section;return next;}),edges:copy.edges||[],annotations:copy.annotations||[],rules:copy.rules||{}};
     const errors=validate(candidate);if(errors.length)throw new Error('复制内容不正确：'+errors.join('；'));
     if(copy.nodes.some(n=>n.kind==='html')&&(copy.sourceExtension!==false||projectExtension))throw new Error('含项目专用交互的页面不能直接跨项目粘贴，请在来源项目复制图片或说明，或让 AI 迁移页面。');
     const created=[],paths=new Map(),images={};
@@ -231,10 +231,10 @@ export async function createStore(root,{builder,validator,extension}={}){
 export async function standalone(bundle,{module,entryModule,view='review',flow,extension}={}){
   const projectExtension=typeof extension==='string'?await loadProjectExtension(extension):extension;
   if(!['review','prototype','document'].includes(view))throw new Error('导出视图不正确');
-  const source=clone(bundle.model),recycled=recycleNodes(source).map(n=>n.id);
+  const source=migrateNodeState(bundle.model),recycled=source.nodes.filter(node=>isDeletedNode(source,node)).map(n=>n.id);
   if(recycled.length){
     const priorNodes=source.nodes,priorEdges=source.edges;
-    removeNodes(source,recycled);
+    removeNodes(source,recycled,{dissolveBranches:false});
     const nodeIds=new Set(source.nodes.map(n=>n.id)),edgeIds=new Set(source.edges.map(e=>e.id));
     const recycledIds=new Set(recycled);if(source.updates)source.updates=source.updates.filter(update=>!recycledIds.has(update.node));
     const removedRules=new Set([...priorNodes.filter(n=>!nodeIds.has(n.id)),...priorEdges.filter(e=>!edgeIds.has(e.id))].map(item=>item.rule).filter(Boolean));
@@ -250,7 +250,8 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const documentSources={},documentImagePaths={};for(const block of documentSourceBlocks(model)){const key=documentSourceKey(block),text=bundle.documentSources?.[key];if(text===undefined)throw new Error('需求正文未载入：'+block.path);documentSources[key]=text;documentImagePaths[key]=bundle.documentImagePaths?.[key]||{};for(const match of text.matchAll(/!\[[^\]\n]*\]\((assets\/[^)\n]+)\)/g)){if(!bundle.images?.[match[1]])throw new Error('需求正文图片未载入');images[match[1]]=bundle.images[match[1]];}}
   for(const n of model.nodes.filter(n=>n.kind==='html'))assertOffline(expandHTML(resources[n.id],bundle.fragments),n.title);
   const fragments={},add=key=>{if(fragments[key]!==undefined)return;fragments[key]=bundle.fragments[key];for(const m of fragments[key].matchAll(/<!--\s*include:([^>]+?)\s*-->/g))add(m[1]);};for(const text of Object.values(resources))for(const m of text.matchAll(/<!--\s*include:([^>]+?)\s*-->/g))add(m[1]);
-  const strip=text=>text.replace(/^import[^\n]+\n/gm,''),inline=text=>text.replace(/<\/script/gi,'<\\/script');
+  const strip=text=>text.replace(/^import[^\n]+\n/gm,'').replace(/^export \{[^\n]+\} from [^\n]+\n/gm,''),inline=text=>text.replace(/<\/script/gi,'<\\/script');
+  const nodeStateCode=strip(await fs.readFile(path.join(tool,'node-state.mjs'),'utf8'));
   const css=offlineStyles(await fs.readFile(path.join(tool,'style.css'),'utf8')),documentCode=strip(await fs.readFile(path.join(tool,'document.mjs'),'utf8')),documentPlayer=strip(await fs.readFile(path.join(tool,'document-player.mjs'),'utf8')),core=offlineCore(strip(await fs.readFile(path.join(tool,'core.mjs'),'utf8'))),routing=strip(await fs.readFile(path.join(tool,'routing.mjs'),'utf8')),player=offlinePlayer(strip(await fs.readFile(path.join(tool,'player.mjs'),'utf8'))),handoff=strip(await fs.readFile(path.join(tool,'handoff.mjs'),'utf8')),library=offlineLibrary(strip(await fs.readFile(path.join(tool,'library.mjs'),'utf8'))),app=offlineApp(strip(await fs.readFile(path.join(tool,'app.mjs'),'utf8')));
   const updatesCode=strip(await fs.readFile(path.join(tool,'updates.mjs'),'utf8')),selectCode=strip(await fs.readFile(path.join(tool,'select.mjs'),'utf8'));
   const extensionCode=projectExtension?(await Promise.all(projectExtension.files.map(async file=>fs.readFile(await safePath(projectExtension.root,file),'utf8')))).map(strip).join('\n'):strip(await fs.readFile(path.join(tool,'extension.mjs'),'utf8'));
@@ -259,7 +260,7 @@ export async function standalone(bundle,{module,entryModule,view='review',flow,e
   const exportBundle={model,resources,fragments,images,documentSources,...(Object.values(documentImagePaths).some(paths=>Object.keys(paths).length)?{documentImagePaths}:{})},compatible=createCompatibilityBundle(exportBundle);
   const data=JSON.stringify(compactExportBoot({readonly:true,view,flow,bundle:exportBundle},compatible)).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
   const restore=`if(globalThis.YUANXING_BOOT.sharedStrings)globalThis.YUANXING_BOOT=(${restoreExportBoot.toString()})(globalThis.YUANXING_BOOT,(${decodeExportArtifact.toString()})(JSON.parse(document.getElementById('yuanxing-artifact').textContent)));`;
-  let html=offlineIndex(await fs.readFile(path.join(tool,'index.html'),'utf8'));html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([restore,routing,documentCode,core,player,documentPlayer,handoff,library,updatesCode,selectCode,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
+  let html=offlineIndex(await fs.readFile(path.join(tool,'index.html'),'utf8'));html=html.replace('<link rel="stylesheet" href="/style.css">',()=>`<style>${css}</style>`).replace('<!-- routing-vendor -->',()=>`<script>${inline(vendors)}</script><script type="text/plain" id="third-party-licenses">${inline(licenses)}</script>`).replace('<script type="module" src="/app.mjs"></script>',()=>`<script>globalThis.YUANXING_BOOT=${data};</script><script type="module">${inline([restore,routing,nodeStateCode,documentCode,core,player,documentPlayer,handoff,library,updatesCode,selectCode,extensionCode,'const esc=escapeHTML;',app].join('\n'))}</script>`);
   html=html.replace('</head>',()=>compatibilityDataTag(exportBundle,compatible)+'</head>');
   return html;
 }
@@ -279,7 +280,7 @@ export function createHandler(store,token,{basePath="",projectId,projects,launch
     if(req.method==='GET'&&url.pathname==='/'){const runtimeVersion=(await store.status()).runtimeVersion,projectKey=sha(store.root);let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<script type="module" src="/app.mjs">',`<script>globalThis.YUANXING_BOOT={...${JSON.stringify({token,basePath,projectId,projects,runtimeVersion,projectKey}).replace(/</g,"\\u003c")}};</script><script type="module" src="/app.mjs">`);if(basePath)html=html.replace('href="/style.css"',`href="${basePath}/style.css"`).replace('src="/app.mjs"',`src="${basePath}/app.mjs"`);return send(200,html,'text/html');}
     if(req.method==='GET'&&url.pathname==='/extension.mjs')return send(200,store.extension?await extensionSource(store.extension,store.extension.entry,basePath):await fs.readFile(path.join(tool,'extension.mjs'),'utf8'),'text/javascript');
     if(req.method==='GET'&&url.pathname.startsWith('/project-extension/')){const file=url.pathname.slice('/project-extension/'.length);if(!store.extension?.files.includes(file))return send(404,{error:'扩展资源不存在'});return send(200,await extensionSource(store.extension,file,basePath),'text/javascript');}
-    if(req.method==='GET'&&['/app.mjs','/document.mjs','/document-player.mjs','/handoff.mjs','/select.mjs','/core.mjs','/routing.mjs','/library.mjs','/player.mjs','/updates.mjs','/style.css','/libavoid.min.js','/libavoid-routing.js'].includes(url.pathname))return send(200,await fs.readFile(path.join(tool,url.pathname.slice(1)),'utf8'),url.pathname.endsWith('.css')?'text/css':'text/javascript');
+    if(req.method==='GET'&&['/app.mjs','/document.mjs','/document-player.mjs','/handoff.mjs','/select.mjs','/core.mjs','/node-state.mjs','/routing.mjs','/library.mjs','/player.mjs','/updates.mjs','/style.css','/libavoid.min.js','/libavoid-routing.js'].includes(url.pathname))return send(200,await fs.readFile(path.join(tool,url.pathname.slice(1)),'utf8'),url.pathname.endsWith('.css')?'text/css':'text/javascript');
     send(404,{error:'入口不存在'});
   }catch(error){const detail=String(error.stderr||'').match(/ValueError:\s*([\s\S]*)/)?.[1]?.trim();send(error.status||400,{error:detail||error.message,...error.details});}
 };}

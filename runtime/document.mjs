@@ -1,3 +1,4 @@
+import {isDeletedNode} from './node-state.mjs';
 // 需求文档保存编排，页面、详细说明和已有 Markdown 正文保持各自唯一来源。
 const docCopy = value => JSON.parse(JSON.stringify(value));
 const docId = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
@@ -13,7 +14,7 @@ export function walkDocument(blocks, visit) {
 export function defaultDocument(model) {
   const blocks = [];
   for (const module of model.modules) {
-    const nodes = model.nodes.filter(n => n.module === module.id && n.overview !== false && n.canvas !== false && n.presentation !== 'branch');
+    const nodes = model.nodes.filter(n => n.module === module.id && !isDeletedNode(model,n) && n.overview !== false && n.canvas !== false && n.presentation !== 'branch');
     if (!nodes.length) continue;
     if (model.modules.length > 1) blocks.push({id:`doc-heading:${module.id}`,type:'text',format:'heading1',text:module.title});
     for (const node of nodes) {
@@ -387,7 +388,7 @@ export function createDocumentView(host) {
     else if(block.type==='image'){const image=el('img','doc-image');image.alt=block.alt||'';image.src=host.bundle().images?.[block.path]||'';article.append(image);}
     else if(block.type==='prototype'){
       const bar=el('div','doc-prototype-bar');bar.append(el('span','',block.title||titleOf(block)));article.append(bar);
-      const node=host.model().nodes.find(node=>node.id===block.node);
+      const node=host.model().nodes.find(node=>node.id===block.node&&!isDeletedNode(host.model(),node));
       article.append(prototypeViewport(block.id,node,block,value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id);if(target)target.frameScale=value;})));
     }else if(block.type==='columns')article.append(rowGrid(block.columns,block.columns.map(column=>column.width||100/block.columns.length)));
     else if(block.type==='table'){const table=el('div','doc-table-grid');table.setAttribute('role','table');for(const row of block.rows){const line=rowGrid(row.cells,block.widths||row.cells.map(()=>100/row.cells.length));line.setAttribute('role','row');table.append(line);}article.append(table);}

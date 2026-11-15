@@ -1,5 +1,5 @@
 import {prototypeDocument,thumbnailHTML,bindNativeDocument,cleanContext,bindDocumentCanvasGestures} from './player.mjs';
-import {expandHTML,eligibleEdges,nextContext,initialNodeContext,wheelZoomFactor} from './core.mjs';
+import {isDeletedNode,expandHTML,eligibleEdges,nextContext,initialNodeContext,wheelZoomFactor} from './core.mjs';
 
 export function documentPrototypeLayout(node,availableWidth,rect,height,{maxWidth=960,maxHeight=560,frameScale=1}={}) {
   const contentWidth=rect?rect[2]+24:node.width,contentHeight=rect?rect[3]+24:node.height;
@@ -99,7 +99,7 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
   const key=event=>{if(event.code!=='Space'||event.type==='keydown'&&event.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;space=event.type==='keydown';if(space&&viewport.matches(':hover'))event.preventDefault();paint();};
   const blur=()=>{space=false;drag=null;finishFrameResize(true);paint();};
   window.addEventListener('keydown',key);window.addEventListener('keyup',key);window.addEventListener('blur',blur);
-  const navigate=id=>{if(disposed)return;const target=host.model().nodes.find(n=>n.id===id&&n.kind!=='note');if(target){node=target;context=initialNodeContext(context,node);render();}};
+  const navigate=id=>{if(disposed)return;const target=host.model().nodes.find(n=>n.id===id&&n.kind!=='note'&&!isDeletedNode(host.model(),n));if(target){node=target;context=initialNodeContext(context,node);render();}};
   // 每轮演示独立创建扩展；刷新前的异步回调不能再操作新一轮画布。
   function createExtension(){
     const generation=++playbackGeneration,active=()=>!disposed&&generation===playbackGeneration;
@@ -118,7 +118,7 @@ export function mountDocumentPrototype(host, initialNode, viewport, block) {
     extension=createExtension();render();
   }
   extension=createExtension();
-  const outgoing=()=>host.model().edges.filter(edge=>edge.from===node.id&&!edge.diagram);
+  const outgoing=()=>host.model().edges.filter(edge=>edge.from===node.id&&!edge.diagram&&!isDeletedNode(host.model(),host.model().nodes.find(n=>n.id===edge.to)));
   const scoped=fn=>host.scope?host.scope({n:node,current:node.id,frames:{[node.id]:frame},frame,pageScale,experience:true,model:host.model()},fn):fn();
   const follow=edges=>{const edge=eligibleEdges(edges,context)[0];if(!edge)return;if(scoped(()=>extension?.travel?.(edge)))return;context=nextContext(context,edge);navigate(edge.to);};
   const setFocus=rect=>{if(Array.isArray(rect)&&rect.length===4&&rect.every(Number.isFinite)&&rect[2]>0&&rect[3]>0){const changed=JSON.stringify(focusRect)!==JSON.stringify(rect);focusRect=rect;if(changed)fitted=true;resize();}};

@@ -18,6 +18,7 @@
 ```json
 {
   "version": 1,
+  "nodeStateVersion": 1,
   "title": "客户分配",
   "entryModule": "customers",
   "contextDefaults": {"role": "admin", "assignee": ""},
@@ -42,8 +43,10 @@
 - `locate --root <目录> --query <关键词>` 默认输出页面、去重编辑源及正文行号；`--module`、`--limit` 可收窄范围。需要 `preview`、`render` 等完整元数据时加 `--json`，返回原有结构化结果。定位和 `help` 不载入服务或布线引擎。
 - `canvasType: "pc" | "mobile"` 只决定卡片类型。移动 HTML 可按尺寸自动识别。
 - 页面节点可设置 `initialContext: {"dialog":"open"}`。直接打开时以项目 `contextDefaults` 为基础；沿流程进入时保留已有上下文和连线的 `setContext`，再覆盖节点明确指定的键。只在进入时应用，未声明的键保持不变。文档嵌入项独立应用；离线沿用相同机制。
-- `canvas: false` 将仍需播放的操作状态与画布展示分开，不出现在画布或回收站，导出时保留；Agent 可用它保存交互需要的中间状态。
-- `overview: false` 且未设置 `canvas: false` 的普通节点进入回收站；导出时排除这些节点及关联连线、批注与专属资源。仍需在原型中跳转的状态应同时设置 `canvas: false`；需要归并到可见页面时使用 `overviewAlias`。
+- `nodeStateVersion: 1` 表示使用独立的节点删除状态；工作台整体 `version` 仍为 1。新编排写入该标记，节点的 `deleted` 缺省为 `false`。
+- `deleted: true` 表示节点已删除；普通页面、图片和说明在回收站展示，分叉点不作为页面卡片列出。播放与离线导出排除已删除节点及关联连线、批注与专属资源。它不依赖 `overview` 或 `canvas` 的值，隐藏状态不会自动变成删除状态。
+- `canvas: false` 隐藏画布卡片，`overview: false` 从概览和目录隐藏节点；未删除的节点仍保留在原型和离线导出中。交互所需的中间状态可同时设置两者，需要归并到可见页面时使用 `overviewAlias`。
+- 没有 `nodeStateVersion` 的旧编排在读取时兼容：已有 `deleted` 值优先；普通节点原先仅用 `overview: false` 且未设 `canvas: false`、没有 `overviewAlias` 时转为已删除，保留旧回收站内容。`canvas: false`、带 `overviewAlias` 的内部状态及分叉点保留。读取不改源文件，首次正常保存写入新标记；不需要批量改写项目。
 - 模块只用于画布组织。没有 `experiences` 时，完整原型从 `entryModule` 的首个有效页面进入，合并全部模块；既有 `modules[].entry` 仅作为兼容的入口线索，不提供手动设置按钮。
 - 只有不同产品或平台才定义 `experiences: [{"id":"pc","title":"PC端","entry":"home"},{"id":"mobile","title":"移动端","entry":"mobile-home"}]`。入口由 Agent 依据已有设计选择，仍可跨模块跳转；选择器只在两个及以上入口时显示。
 - 旧项目的 `flows` 作为显式场景入口保留兼容；新增项目使用产品或平台级 `experiences`，不要按模块自动生成场景。每个入口必须对应实际可体验页面，`context` 只影响演示条件。

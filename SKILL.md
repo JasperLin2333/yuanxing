@@ -4,7 +4,7 @@ description: 元形（Yuanxing）：用自然语言进行产品需求设计与�
 license: MIT
 metadata:
   author: JasperLin2333
-  version: "0.4.15"
+  version: "0.4.16"
 ---
 
 # 元形
@@ -33,7 +33,7 @@ node "<Skill目录>/scripts/yuanxing.mjs" locate --root "<项目目录>" --query
 
 ## 编辑与保留
 
-- 先读目标当前内容，保留无关页面、画布位置、连线、批注及用户改动。人与 Agent 并行编辑编排时保留原始 JSON 基线，用 `apply --root <项目目录> --base <修改前JSON> --model <修改后JSON>` 合并，同字段冲突保留双方；临时文件收口清理。
+- 先读目标当前内容，保留无关页面、画布位置、连线、批注及用户改动。新编排用 `nodeStateVersion: 1` 与 `deleted` 区分删除和隐藏，`overview`、`canvas` 只控制展示；旧数据按[项目格式](references/project-format.md#页面与画布)兼容。人与 Agent 并行编辑编排时保留原始 JSON 基线，用 `apply --root <项目目录> --base <修改前JSON> --model <修改后JSON>` 合并，同字段冲突保留双方；临时文件收口清理。
 - 评审后的需求或原型发生变化时，用 `updates add --root <项目目录> --text <变化> [--node <页面>]` 把对评审、开发有意义的变化追加到更新说明，默认当天日期；规划阶段不写更新说明，完整规则仍写在 PRD，不记录制作过程。格式见[项目格式](references/project-format.md#更新说明)。
 - 复用已有 HTML、截图、风格与组件；项目外输入复制后使用。页面优先自包含 HTML/CSS/少量 JavaScript；同一页面的流程节点优先共用页面和初始状态配置，表单、Tabs 和辅助弹层留在页内，只为需要独立讲解或直达的主要阶段拆节点。仅用于播放的中间状态按需保留，不按每次点击创建页面，也不为减少节点数破坏既有交互。
 - 编写或修改原型、工作台的网页交互时，按本轮涉及的输入、弹层、拖拽、状态保留及兼容性读取 [Web 交互与离线兼容](references/web-interactions.md) 的相关小节；延续已有设计，不借此增加业务步骤或重构无关组件。

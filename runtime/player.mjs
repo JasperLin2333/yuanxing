@@ -1,3 +1,4 @@
+import {isDeletedNode} from './node-state.mjs';
 // 页面在不具备同源权限的 iframe 中运行；这里只传递演示上下文和已声明的跳转。
 export function cleanContext(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -7,7 +8,7 @@ export function cleanContext(value) {
 }
 
 export function flowEntries(model) {
-  const playable=node=>node&&node.kind!=='note';
+  const playable=node=>node&&!isDeletedNode(model,node)&&node.kind!=='note';
   const explicit=model.experiences?.length?model.experiences:model.flows;
   if (explicit?.length) return explicit.filter(flow => playable(model.nodes.find(node => node.id === flow.entry)));
   const module=model.modules.find(item=>item.id===model.entryModule)||model.modules[0];

@@ -101,9 +101,9 @@ export async function run(args,{sessionToken}={}){
     }
     else{
       await fs.mkdir(path.join(root,'artifact/pages'),{recursive:true});await fs.mkdir(path.join(root,'artifact/assets'));
-      await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify({version:1,title:flags.name||'我的原型',entryModule:'main',modules:[{id:'main',title:'主要流程'}],nodes:[],edges:[],annotations:[]},null,2)+'\n',{flag:'wx'});
+      await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify({version:1,nodeStateVersion:1,title:flags.name||'我的原型',entryModule:'main',modules:[{id:'main',title:'主要流程'}],nodes:[],edges:[],annotations:[]},null,2)+'\n',{flag:'wx'});
     }
-    if(template==='iteration'&&flags.name){const file=path.join(root,'artifact/workbench.json'),model=JSON.parse(await fs.readFile(file,'utf8'));model.title=flags.name;await fs.writeFile(file,JSON.stringify(model,null,2)+'\n');}
+    if(template==='iteration'){const {migrateNodeState}=await import('../runtime/node-state.mjs');const file=path.join(root,'artifact/workbench.json'),model=migrateNodeState(JSON.parse(await fs.readFile(file,'utf8')));if(flags.name)model.title=flags.name;await fs.writeFile(file,JSON.stringify(model,null,2)+'\n');}
     console.log(`已创建 ${root}`);return;
   }
   if(command==='workspace'){

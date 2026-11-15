@@ -18,13 +18,13 @@ export function offlineCore(source){
     ['(recycle?recycleCanvasNodes(model):moduleNodes(model,moduleId))','moduleNodes(model,moduleId)'],
     ['hidden=recycle?[]:model.nodes','hidden=model.nodes'],
     ['if(recycle){delete edge.waypoints;delete edge.labelPosition;}else{if(edge.waypoints)edge.waypoints=edge.waypoints.map(shift);if(edge.labelPosition)edge.labelPosition=shift(edge.labelPosition);}','if(edge.waypoints)edge.waypoints=edge.waypoints.map(shift);if(edge.labelPosition)edge.labelPosition=shift(edge.labelPosition);'],
-    ['if(recycle){delete copy.overview;delete copy.overviewAlias;}else if(copy.overviewAlias','if(copy.overviewAlias'],
+    ['if(recycle){delete copy.deleted;delete copy.canvas;delete copy.overview;delete copy.overviewAlias;}else if(copy.overviewAlias','if(copy.overviewAlias'],
     ['copyCanvasSelection(model,moduleId,ids,{recycle})','copyCanvasSelection(model,moduleId,ids)'],
     ['if(recycle)removeNodes(model,removed);else removeCanvasNodes(model,moduleId,removed);','removeCanvasNodes(model,moduleId,removed);'],
     ['  if(recycle)moveRecycleNodes(model,[]);\n',''],
     ['moveRecycleNodes(model,[]);',''],
     ['module:recycle&&model.modules.some(m=>m.id===n.module)?n.module:moduleId','module:moduleId'],
-    ['    if(recycle){next.overview=false;delete next.overviewAlias;model.recyclePositions??={};model.recyclePositions[next.id]={x:next.x,y:next.y};}\n',''],
+    ['    if(recycle){next.deleted=true;delete next.overviewAlias;model.recyclePositions??={};model.recyclePositions[next.id]={x:next.x,y:next.y};}\n',''],
     ["  if(model.recyclePositions!==undefined&&(model.recyclePositions===null||typeof model.recyclePositions!=='object'||Array.isArray(model.recyclePositions)||Object.entries(model.recyclePositions).some(([id,p])=>!ids.has(id)||!p||![p.x,p.y].every(Number.isFinite))))errors.push('回收站画布位置不正确');\n",''],
     ['  for(const id of removed)if(model.recyclePositions)delete model.recyclePositions[id];\n',''],
     ['if(model.recyclePositions)delete model.recyclePositions[id];',''],
@@ -36,7 +36,7 @@ export function offlineLibrary(source){
   source=apply(source,[
     [',getRecycleOpen,openRecycle,',','],
     ['&&!getRecycleOpen?.()',''],
-    ["    if(openRecycle){const footer=libraryElement('div','library-sidebar-footer'),button=libraryButton(undefined,openRecycle,`library-recycle ${getRecycleOpen?.()?'active':''}`),count=recycleNodes(model()).length;button.title='回收站：查看未显示在画布上的内容';button.append(libraryIcon('delete'),libraryElement('span','','回收站'),libraryElement('span','library-recycle-count',String(count)));footer.append(button);nav.append(footer);}\n",'']
+    ["    if(openRecycle){const footer=libraryElement('div','library-sidebar-footer'),button=libraryButton(undefined,openRecycle,`library-recycle ${getRecycleOpen?.()?'active':''}`),count=recycleNodes(model()).length;button.title='回收站：查看已删除的内容';button.append(libraryIcon('delete'),libraryElement('span','','回收站'),libraryElement('span','library-recycle-count',String(count)));footer.append(button);nav.append(footer);}\n",'']
   ]);
   source=source.replace(/^.*library-recycle.*\n/gm,'');
   return assertNoEditorCode(source,'library');
@@ -77,6 +77,7 @@ export function offlineApp(source){
     ['recycleOpen=saved.recycleOpen;',''],
     ['if(!recycleOpen)camera=','camera='],
     ['!recycleOpen&&',''],
+    ['if(!n||isDeletedNode(model,n)&&!recycleOpen)return;','if(!n||isDeletedNode(model,n))return;'],
     ['&&!recycleOpen',''],
     ['||recycleOpen','',4],
     ['recycleOpen=false;','',4]
@@ -87,6 +88,6 @@ export function offlineStyles(source){
   source=apply(source,[["/* 回收站复用模块画布。 */\n",''],["#recycle-empty{position:absolute;top:45%;left:0;right:0;margin:0;color:var(--muted);text-align:center;pointer-events:none}\n",''],[".node-recycled .ref-label{max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n",'']]);
   return assertNoEditorCode(source,'style');
 }
-export function offlineIndex(source){return assertNoEditorCode(replaceExact(source,'<p id="recycle-empty" hidden>暂无未显示的内容</p>'), 'index');}
+export function offlineIndex(source){return assertNoEditorCode(replaceExact(source,'<p id="recycle-empty" hidden>暂无已删除的内容</p>'), 'index');}
 export function offlinePlayer(source){return assertNoEditorCode(replaceExact(source,'// 缩略预览分帧挂载，取消离屏任务，不让回收站同时创建大量 iframe。','// 缩略预览分帧挂载，并取消离屏任务。'),'player');}
 function assertNoEditorCode(source,name){if(/recycl|回收站/i.test(source))throw new Error('离线代码仍包含回收站实现：'+name);return source;}
