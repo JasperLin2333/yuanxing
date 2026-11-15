@@ -3,35 +3,49 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="元形，人和 AI 共同设计产品的工作台。把产品想法变成团队能讨论、能体验、能继续修改的共同设计。复用截图与 HTML，在流程画布、可交互需求文档和完整原型中理解、体验和交流。">
+  <meta name="description" content="元形是给 AI 助手用的开源原型 Skill，配套本地可编辑工作台。用自然语言、截图和已有页面制作可交互原型，整理流程与需求，按需导出单个 HTML 分享。">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="zh_CN">
-  <meta property="og:title" content="元形 · 人和 AI 共同设计产品的工作台">
-  <meta property="og:description" content="让产品意图成为能讨论、能体验的共同设计，让团队与 AI 围绕同一份设计继续推进。">
+  <meta property="og:title" content="元形 · 用自然语言，把需求做成可交互原型">
+  <meta property="og:description" content="把元形装进你的 AI 助手，提供需求与材料，在本地工作台体验、修改，再导出单个 HTML 给团队评审。">
   <meta property="og:url" content="https://jasperlin2333.github.io/yuanxing/">
   <link rel="canonical" href="https://jasperlin2333.github.io/yuanxing/">
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/site.css">
   <script src="assets/site.js" defer></script>
-  <title>元形 Yuanxing · 人和 AI 共同设计产品</title>
+  <title>元形 Yuanxing · 用自然语言制作可交互原型</title>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到正文</a>
   <header class="site-header wrap">
     <a class="brand" href="./" aria-label="元形首页"><img src="assets/mark.svg" width="34" height="34" alt=""><span>元形 <small>Yuanxing</small></span></a>
-    <nav aria-label="主导航"><a href="#example">看案例</a><a href="#install">安装 Skill</a><a href="https://github.com/JasperLin2333/yuanxing">GitHub <span aria-hidden="true">↗</span></a></nav>
+    <nav aria-label="主导航"><a href="#workflow">怎么用</a><a href="#example">看案例</a><a href="#install">安装</a><a href="https://github.com/JasperLin2333/yuanxing">GitHub <span aria-hidden="true">↗</span></a></nav>
   </header>
   <main id="main">
     <section class="hero wrap">
-      <p class="eyebrow"><span></span>人和 AI 共同设计产品的工作台</p>
-      <h1>把产品想法，<br>变成共同理解的设计。</h1>
-      <p class="hero-description">用原型、流程和说明，把意图表达清楚。<br class="desktop-break">让团队能讨论、能体验，让 AI 根据明确反馈继续修改。</p>
-      <div class="actions"><a class="button primary" href="demo/prototype.html">先体验完整原型 <span aria-hidden="true">→</span></a><a class="button secondary" href="#install">安装元形 Skill</a></div>
-      <p class="hero-note">在线示例直接打开 · 本地项目可编辑 · MIT 开源</p>
-      <figure class="workflow"><img src="assets/readme-flow.svg" width="1280" height="640" alt="工作方式示意：保留旧客户列表截图，连接新增的分配表单、完成页和权限分支；同一份设计可用于流程评审与独立体验。"><figcaption>在同一份设计中理解目标、体验流程、讨论改动。</figcaption></figure>
+      <p class="eyebrow"><span></span>给 AI 助手用的开源原型 Skill</p>
+      <h1>用自然语言，<br>把需求做成可交互原型。</h1>
+      <p class="hero-description">把想法、截图或已有页面交给 AI，让它制作和修改原型。<br class="desktop-break">你在本地工作台体验、整理和评审，需要分享时再导出单个 HTML。</p>
+      <div class="actions"><a class="button primary" href="#workflow">看看怎么用 <span aria-hidden="true">→</span></a><a class="button secondary" href="demo/prototype.html">先体验示例</a></div>
+      <p class="hero-note">安装到现有 AI 助手 · 配套本地可编辑工作台 · MIT 开源</p>
+      <figure class="workflow"><img src="assets/readme-flow.svg" width="1280" height="640" alt="客户分配原型示意：复用旧列表截图，连接新增表单、完成页和权限分支，同一项目提供画布、需求文档和完整原型。"><figcaption>已有页面继续用，这次新增的操作和分支交给 AI 补上。</figcaption></figure>
+    </section>
+    <section class="section wrap" id="workflow">
+      <div class="section-heading"><p class="eyebrow">从第一次使用到团队评审</p><h2>在 AI 助手里提需求，<br>在工作台里看结果。</h2><p>元形由 Skill 和本地工作台组成。AI 负责生成与修改，工作台负责查看、体验和直接编辑；没有完整 PRD，也可以从一个具体改动开始。</p></div>
+      <div class="example-layout">
+        <div class="example-path"><ol>
+          <li><span>01</span><div><h3>先把 Skill 装进 AI 助手</h3><p>使用能读写本地文件、运行命令的 AI 助手，准备 Node.js 20+。<a href="#install">复制安装话术</a>，让 AI 完成安装并确认可以使用。</p></div></li>
+          <li><span>02</span><div><h3>给材料，说清这次改哪里</h3><p>提供需求、截图或已有 HTML，说明目标、改动范围和项目保存位置。可以新建产品，也可以只改现有页面的一处功能。</p></div></li>
+          <li><span>03</span><div><h3>让 AI 制作并打开工作台</h3><p>AI 生成页面、连接主流程，启动或复用本地工作台并给出入口。首次启动会打开浏览器，后续修改复用已有工作台；关掉页面后，可以让 AI 重新打开。</p></div></li>
+          <li><span>04</span><div><h3>边体验，边反馈修改</h3><p>在工作台拖动页面、编辑说明或加批注，要改页面与交互则回到 AI 对话说；批注不会自动执行。AI 改完后先切回流程画布加载变化，再进入完整原型体验。</p></div></li>
+          <li><span>05</span><div><h3>需要评审时，把规则整理清楚</h3><p>让 AI 用现有原型组织流程画布和需求文档。已有 Markdown 可以引用原章节；先讲清主流程，再逐步补充已确定的细节。</p></div></li>
+          <li><span>06</span><div><h3>导出分享，继续修改源项目</h3><p>导出一个自包含 HTML，选择打开时先看画布、需求文档还是完整原型；文件中仍可切换三个视图。同事用浏览器打开即可，反馈后继续改原项目，再按需导出新版。</p></div></li>
+        </ol></div>
+        <div class="install-aside"><h3>第一条制作需求，可以这样说。</h3><blockquote>使用元形。基于我提供的客户列表截图，增加“分配客户”：管理员选择负责成员，确认后查看结果。只改这段流程，项目保存到“客户分配原型”目录，做完打开工作台。</blockquote><h3>体验后，接着说具体改动。</h3><blockquote>继续修改“客户分配原型”。把单选成员改成多选，确认页展示选中的成员，其他页面和我调整过的画布位置保留。</blockquote><p>换一个对话继续时，给 AI 同一个项目目录。原型、流程与说明都留在这个项目里，可以接着修改。</p><a href="#install">还没安装？先完成第一步 →</a></div>
+      </div>
     </section>
     <section class="section wrap" id="example">
-      <div class="section-heading"><p class="eyebrow">从一个具体需求开始</p><h2>给已有客户列表，<br>加上“分配客户”。</h2><p>同一句需求，可能有不同理解。走一遍管理员与普通成员的路径，把操作条件和结果一起讨论清楚。</p></div>
+      <div class="section-heading"><p class="eyebrow">看一个做好的案例</p><h2>给已有客户列表，<br>加上“分配客户”。</h2><p>保留旧列表截图，用 HTML 补上新表单和结果页，再把不同角色的路径接起来。下面的在线示例可以直接操作。</p></div>
       <div class="example-layout">
         <div class="example-path"><span class="path-label">管理员</span><ol><li><span>01</span><div><h3>从旧页面进入</h3><p>点击列表截图中的“分配客户”。旧界面保持原样。</p></div></li><li><span>02</span><div><h3>在新表单中操作</h3><p>选择负责成员，确认分配。新增部分使用 HTML。</p></div></li><li><span>03</span><div><h3>查看结果，返回列表</h3><p>结果页展示刚才选择的成员，完成这一段用户流程。</p></div></li></ol></div>
         <div class="example-side"><div class="branch"><span class="path-label">普通成员</span><h3>同一个入口，另一条分支。</h3><p>在体验页切换为“普通成员访问”，查看权限提示。关键条件也在画布上讲清楚。</p></div><div class="example-links"><a href="demo/prototype.html">操作这个案例 <span aria-hidden="true">↗</span></a><a href="demo/review.html">查看流程画布 <span aria-hidden="true">↗</span></a><a href="https://github.com/JasperLin2333/yuanxing/tree/main/examples/product-iteration">获取可编辑项目 <span aria-hidden="true">↗</span></a></div></div>
@@ -39,15 +53,15 @@
       <p class="section-note">案例界面与数据均为虚构示例。</p>
     </section>
     <section class="section three-views">
-      <div class="wrap"><div class="section-heading"><p class="eyebrow">一份设计，三种视图</p><h2>围绕同一份设计，<br>理解、体验、讨论。</h2></div><div class="view-grid"><article><span class="view-number">01 / 流程画布</span><h3>入口、分支、说明，放在一起。</h3><p>整理页面关系，拖动、连线和打点批注。局部修改保留已有的人工整理。</p><a href="demo/review.html">打开评审示例 →</a></article><article><span class="view-number">02 / 交互式需求文档</span><h3>原型与说明，按你的方式组合。</h3><p>先说明背景、目标与功能，再展开详细规则。长说明上下阅读，短说明按需左右对照，页面或组件可直接操作。</p><a href="demo/document.html">打开交互文档 →</a></article><article><span class="view-number">03 / 完整原型</span><h3>从入口到结果，连续操作。</h3><p>顶栏一键切换，按 Esc 回到画布。也可以导出单个 HTML，发给同事离线体验。</p><a href="demo/prototype.html">打开体验示例 →</a></article></div></div>
+      <div class="wrap"><div class="section-heading"><p class="eyebrow">一个项目，三种查看方式</p><h2>看流程、读需求、操作原型，<br>各有合适的入口。</h2></div><div class="view-grid"><article><span class="view-number">01 / 流程画布</span><h3>评审入口和分支</h3><p>把页面关系、操作条件和说明放到一张画布上。可以拖动整理、连接流程，在具体位置打点批注。</p><a href="demo/review.html">打开流程画布 →</a></article><article><span class="view-number">02 / 交互式需求文档</span><h3>对照原型，阅读规则</h3><p>按功能组织正文、表格和可操作的页面或组件。已有 Markdown 按章节引用，直接修订引用正文可保存回原文件。</p><a href="demo/document.html">打开需求文档 →</a></article><article><span class="view-number">03 / 完整原型</span><h3>从入口走到结果</h3><p>连续点击、输入和选择，体验已经设计的用户路径。三个视图可在顶栏切换，分享时选好默认视图，导出一个文件即可。</p><a href="demo/prototype.html">打开完整原型 →</a></article></div></div>
     </section>
     <section class="section wrap" id="install">
-      <div class="section-heading"><p class="eyebrow">放进你现有的 AI 工作流</p><h2>把这段话发给 AI，<br>从你的产品开始。</h2><p>需要能读写本地文件、运行命令的 AI 助手，以及 Node.js 20+。</p></div>
-      <div class="install-layout"><div class="prompt-panel"><div class="panel-heading"><span>复制给你的 AI 助手</span><button class="copy-button" type="button" data-copy="install-prompt">复制提示词</button></div><p id="install-prompt">请安装 https://github.com/JasperLin2333/yuanxing 中的元形 Skill。先阅读 SKILL.md，按当前宿主的 Skill 目录规范安装，保留随包运行时与资源。安装后，基于我提供的需求和已有材料，生成团队可讨论的流程画布和可体验的原型；已有产品只修改本次涉及的部分。</p><div class="command"><div class="panel-heading"><span>已有 skills CLI？也可以在目标项目目录运行</span><button class="copy-button" type="button" data-copy="install-command">复制命令</button></div><code id="install-command">npx skills add JasperLin2333/yuanxing --skill yuanxing</code></div><p class="copy-status" role="status" aria-live="polite"></p></div><div class="install-aside"><h3>安装后，把实际需求说出来。</h3><blockquote>使用元形。基于这张已有客户列表，只设计“分配客户”这次改动。把管理员和普通成员的流程放到画布上，并导出能独立体验的原型。</blockquote><p>元形使用你现有的 AI 助手，本身无需额外配置模型 API Key。</p><a href="https://github.com/JasperLin2333/yuanxing#start">查看完整安装说明 →</a><a href="https://github.com/JasperLin2333/yuanxing/releases/latest">下载离线包 →</a></div></div>
+      <div class="section-heading"><p class="eyebrow">先完成安装</p><h2>让你的 AI 助手，<br>学会使用元形。</h2><p>准备一个能读写本地文件、运行命令的 AI 助手，以及 Node.js 20+。元形使用你现有的模型服务，无需另配元形专用 API Key。</p></div>
+      <div class="install-layout"><div class="prompt-panel"><div class="panel-heading"><span>复制给你的 AI 助手</span><button class="copy-button" type="button" data-copy="install-prompt">复制安装话术</button></div><p id="install-prompt">请安装 https://github.com/JasperLin2333/yuanxing 中的元形 Skill。先阅读 SKILL.md，按当前 AI 助手的 Skill 目录规范安装，保留完整运行时与资源。检查 Node.js 20+、文件读写和命令执行能力，并确认当前对话能使用元形；安装完成后告诉我。</p><p class="copy-status" role="status" aria-live="polite"></p></div><div class="install-aside"><h3>安装好，再给实际需求。</h3><p>回到 AI 对话，提供需求和材料，告诉它项目保存到哪里。AI 会按你的范围制作原型，给出本地工作台入口。</p><p>如果已有项目，直接提供项目目录，说明本次要改的页面或功能即可。</p><a href="#workflow">查看完整使用流程 →</a><a href="https://github.com/JasperLin2333/yuanxing#start">查看 README 安装说明 →</a><a href="https://github.com/JasperLin2333/yuanxing/releases/latest">下载 Skill 安装包 →</a></div></div>
     </section>
-    <section class="section wrap faq"><div class="section-heading"><h2>开始前，你可能想知道。</h2></div><details><summary>这是在线生成原型的网站吗？</summary><p>这个网站提供可直接体验的示例。制作自己的原型时，把元形安装到能读写本地文件、运行命令的 AI 助手中，项目保存在你选择的本地目录。</p></details><details><summary>已有截图能和新页面接起来吗？</summary><p>可以。截图设置点击热点，HTML 绑定控件跳转。不变的部分可以一直保留为截图。</p></details><details><summary>同事查看原型也要安装吗？</summary><p>导出的流程画布、需求文档和完整原型均为单个 HTML 文件，同事在浏览器打开即可查看，无需安装元形或启动服务。</p></details><details><summary>支持什么输入？</summary><p>当前支持自包含 HTML、本地 CSS、图片、普通 JavaScript，以及 PNG、JPEG、WebP 截图。框架工程、外部 CDN、真实登录和网络接口需要先适配。<a href="https://github.com/JasperLin2333/yuanxing/blob/main/references/project-format.md">查看项目格式</a>。</p></details></section>
-    <section class="closing wrap"><p class="eyebrow">先试一段你熟悉的流程</p><h2>让理解可以共享，<br>让工作持续向前。</h2><div class="actions"><a class="button primary" href="demo/prototype.html">体验完整原型 →</a><a class="button secondary" href="https://github.com/JasperLin2333/yuanxing/issues/new?title=%E6%88%91%E7%9A%84%E5%85%83%E5%BD%A2%E4%BD%BF%E7%94%A8%E5%8F%8D%E9%A6%88">告诉我你的使用场景</a></div></section>
+    <section class="section wrap faq"><div class="section-heading"><h2>开始前，你可能想知道。</h2></div><details><summary>我在这个网站上制作自己的原型吗？</summary><p>这里提供在线示例。制作自己的项目时，在现有 AI 助手中安装元形并提出需求；项目保存在你选择的本地目录，工作台在本机浏览器中打开。</p></details><details><summary>需求还没写完整，能开始吗？</summary><p>可以。先给目标、已有材料和本次范围，让 AI 做出主流程。看过原型后继续补充和修改，需要评审时再整理已确定的规则。</p></details><details><summary>已有截图能和新页面接起来吗？</summary><p>可以。AI 为截图设置点击热点，为 HTML 绑定控件跳转。已有界面可以保留为截图，新增操作再使用可交互页面。</p></details><details><summary>同事查看原型也要安装吗？</summary><p>导出一个 HTML 文件，同事在浏览器打开即可体验，并切换画布、需求文档和完整原型。离线文件保留导出时的内容；反馈后继续修改源项目，再导出新版。</p></details><details><summary>我在工作台里加的批注，AI 会自动执行吗？</summary><p>批注用于说明和评审。要落实改动，回到 AI 对话说明要处理哪些反馈；你也可以直接在工作台中修改布局、说明和需求文字。</p></details><details><summary>支持什么输入？</summary><p>可以从文字需求开始，也能复用 PNG、JPEG、WebP 截图，以及自包含 HTML、本地 CSS、图片和普通 JavaScript。框架工程、外部 CDN、真实登录和网络接口需要先适配。<a href="https://github.com/JasperLin2333/yuanxing/blob/main/references/project-format.md">查看项目格式</a>。</p></details></section>
+    <section class="closing wrap"><p class="eyebrow">从一个具体改动开始</p><h2>拿一张已有页面，<br>试着改一段流程。</h2><div class="actions"><a class="button primary" href="#install">安装元形 Skill →</a><a class="button secondary" href="demo/prototype.html">先体验公开示例</a></div></section>
   </main>
-  <footer class="site-footer wrap"><a class="brand" href="./">元形 <small>Yuanxing</small></a><p>人和 AI 共同设计，让想法能讨论、能体验、能继续推进。</p><a href="https://github.com/JasperLin2333/yuanxing/blob/main/LICENSE">MIT License</a></footer>
+  <footer class="site-footer wrap"><a class="brand" href="./">元形 <small>Yuanxing</small></a><p>用自然语言制作原型，在本地工作台体验和评审。</p><a href="https://github.com/JasperLin2333/yuanxing/blob/main/LICENSE">MIT License</a></footer>
 </body>
 </html>
