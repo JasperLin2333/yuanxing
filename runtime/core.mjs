@@ -1,5 +1,5 @@
 // 编辑端、离线分享端与校验共用的数据操作。
-import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty} from './routing.mjs';
+import {solveConnections,canvasCardSize,nodeCardSize,nodeCardType,connectionJetty,routingFeishuOrthogonal,simplifyOrthogonalPoints,adaptManualPolylineOnNodeMove,routingNearestAlignment,routingSplitSegment} from './routing.mjs';
 import {validateDocument,pruneDocument,documentAssetPaths,walkDocument} from './document.mjs';
 import {isDeletedNode,upgradeNodeState,migrateNodeState} from './node-state.mjs';
 export {isDeletedNode,migrateNodeState} from './node-state.mjs';
@@ -35,9 +35,18 @@ export function replaceCanvasImage(model,id,image,expectedPath){
   for(const item of [...model.annotations,...model.edges])if((item.node||item.from)===id&&!item.selector&&(item.point||item.rect))item.imagePath??=target.path;
   Object.assign(target,{path:image.path,width:image.width,height:image.height});return true;
 }
+export const connectionLineTypes=['polyline','straight','curve'];
+export const connectionLineStyles=['solid','dashed'];
+export const connectionArrowModes=['end','both','none'];
+const isCanvasAnchor=point=>Array.isArray(point)&&point.length===2&&point.every(v=>Number.isFinite(v)&&v>=0&&v<=1);
+const isCardinalAnchor=(side,anchor)=>{if(!isCanvasAnchor(anchor))return true;const mid={top:[.5,0],right:[1,.5],bottom:[.5,1],left:[0,.5]}[side];return !!mid&&Math.abs(anchor[0]-mid[0])<1e-3&&Math.abs(anchor[1]-mid[1])<1e-3;};
 export function connectionPoint(node,side,offset=0) {
   const width=canvasNodeWidth(node),height=canvasNodeHeight(node);
   if(isBranch(node))return [node.x+width/2,node.y+height/2];
+  if(isCanvasAnchor(offset)){
+    const nx=Math.max(0,Math.min(1,offset[0])),ny=Math.max(0,Math.min(1,offset[1]));
+    return {top:[node.x+width*nx,node.y],right:[node.x+width,node.y+height*ny],bottom:[node.x+width*nx,node.y+height],left:[node.x,node.y+height*ny]}[side];
+  }
   const horizontal=side==='top'||side==='bottom',size=horizontal?width:height,shift=Math.max(-size/2+20,Math.min(size/2-20,offset));
   return {top:[node.x+width/2+shift,node.y],right:[node.x+width,node.y+height/2+shift],bottom:[node.x+width/2+shift,node.y+height],left:[node.x,node.y+height/2+shift]}[side];
 }
@@ -48,17 +57,41 @@ export function connectionDirections(edge,from,to){
   const side=horizontal?(dx<0?'left':'right'):(dy<0?'top':'bottom'),opposite={top:'bottom',bottom:'top',left:'right',right:'left'};
   return [edge.fromSide||side,edge.toSide||opposite[side]];
 }
-// 靠近端点（tolerance 内）吸附到该端点；落在页面内部但不靠近端点时，选面向来源 toward 的一侧，未提供来源时取最近一侧。
-export function connectionTarget(nodes,point,{exclude=[],tolerance=24,side=null,toward=null}={}){
+// 飞书三层吸附：1. 中心磁力点（tolerance）；2. 边框轮廓任意点（contourTolerance）；3. 卡片内部自动择侧。
+export function connectionTarget(nodes,point,{exclude=[],tolerance=24,contourTolerance=Math.min(16,tolerance),side=null,toward=null,allowContour=true}={}){
   const excluded=new Set(exclude);let best=null;
   for(const n of nodes){
     if(excluded.has(n.id))continue;
-    const inside=point[0]>=n.x&&point[0]<=n.x+canvasNodeWidth(n)&&point[1]>=n.y&&point[1]<=n.y+canvasNodeHeight(n);
-    const anchors=(side?[side]:connectionSides).map(candidate=>{const anchor=connectionPoint(n,candidate);return {candidate,anchor,distance:Math.hypot(anchor[0]-point[0],anchor[1]-point[1])};});
-    let pick=anchors.reduce((a,b)=>b.distance<a.distance?b:a);
-    if(inside&&!side&&toward&&toward.id!==n.id&&pick.distance>tolerance){const facing=connectionDirections({},toward,n)[1];pick=anchors.find(item=>item.candidate===facing)||pick;}
-    if(!inside&&pick.distance>tolerance)continue;
-    const score=pick.distance-(inside?1e6:0);if(!best||score<best.score)best={node:n,side:pick.candidate,point:pick.anchor,distance:pick.distance,score};
+    const w=canvasNodeWidth(n),h=canvasNodeHeight(n),inside=point[0]>=n.x&&point[0]<=n.x+w&&point[1]>=n.y&&point[1]<=n.y+h;
+    const anchors=(side?[side]:connectionSides).map(candidate=>{const pt=connectionPoint(n,candidate);return {candidate,pt,distance:Math.hypot(pt[0]-point[0],pt[1]-point[1])};});
+    const magnet=anchors.reduce((a,b)=>b.distance<a.distance?b:a);
+    let pick=null;
+    if(side||magnet.distance<=tolerance){
+      if(inside||magnet.distance<=tolerance)pick={side:magnet.candidate,point:magnet.pt,anchor:null,distance:magnet.distance,snapped:'magnet'};
+    }
+    if(!pick&&allowContour&&!side&&!isBranch(n)){
+      const padX=w>40?Math.min(10/w,.04):.02,padY=h>40?Math.min(10/h,.04):.02;
+      const clampX=v=>Math.max(padX,Math.min(1-padX,(v-n.x)/w)),clampY=v=>Math.max(padY,Math.min(1-padY,(v-n.y)/h));
+      const nx=clampX(point[0]),ny=clampY(point[1]);
+      const borders=[
+        {side:'top',anchor:[nx,0],pt:[n.x+w*nx,n.y]},
+        {side:'right',anchor:[1,ny],pt:[n.x+w,n.y+h*ny]},
+        {side:'bottom',anchor:[nx,1],pt:[n.x+w*nx,n.y+h]},
+        {side:'left',anchor:[0,ny],pt:[n.x,n.y+h*ny]}
+      ].map(b=>({...b,distance:Math.hypot(b.pt[0]-point[0],b.pt[1]-point[1])}));
+      const contour=borders.reduce((a,b)=>b.distance<a.distance?b:a);
+      if(contour.distance<=contourTolerance){
+        const anchor=isCardinalAnchor(contour.side,contour.anchor)?null:contour.anchor;
+        pick={side:contour.side,point:anchor?contour.pt:connectionPoint(n,contour.side),anchor,distance:contour.distance,snapped:anchor?'contour':'magnet'};
+      }
+    }
+    if(!pick&&inside){
+      const chosen=!side&&toward&&toward.id!==n.id?connectionDirections({},toward,n)[1]:magnet.candidate;
+      pick={side:chosen,point:connectionPoint(n,chosen),anchor:null,distance:magnet.distance,snapped:'inside'};
+    }
+    if(!pick)continue;
+    const score=pick.distance-(inside?1e6:0);
+    if(!best||score<best.score)best={node:n,side:pick.side,point:pick.point,anchor:pick.anchor,distance:pick.distance,snapped:pick.snapped,score};
   }
   return best;
 }
@@ -70,33 +103,213 @@ export function looseConnectionSide(fixed,point,previous=null){
   const horizontal=xGap>=0&&(yGap<0||ratio>=bias);
   return horizontal?(dx<0?'right':'left'):(dy<0?'bottom':'top');
 }
-// 预览与提交使用同一组节点、端口及避障计算；游离端点只在预览期间存在。
-export function previewConnection(nodes,fixed,fixedSide,target,targetSide,{endpoint='to',branch=false}={}){
+// 预览与提交使用同一组节点、端口、轮廓锚点与线形计算；游离端点只在预览期间存在。
+export function previewConnection(nodes,fixed,fixedSide,target,targetSide,{endpoint='to',branch=false,fixedAnchor=null,targetAnchor=null,lineType='polyline'}={}){
   if(!fixed||!target||fixed.id===target.id)return null;
   const movingFrom=endpoint==='from',from=movingFrom?target:fixed,to=movingFrom?fixed:target;
-  const edge={id:'connection-preview',from:from.id,to:to.id,fromSide:movingFrom?targetSide:branch?connectionDirections({},fixed,target)[0]:fixedSide,toSide:movingFrom?fixedSide:targetSide};
+  const fSide=movingFrom?targetSide:branch?connectionDirections({},fixed,target)[0]:fixedSide,tSide=movingFrom?fixedSide:targetSide;
+  const fAnchor=movingFrom?targetAnchor:fixedAnchor,tAnchor=movingFrom?fixedAnchor:targetAnchor;
+  const edge={id:'connection-preview',from:from.id,to:to.id,fromSide:fSide,toSide:tSide,...(isCanvasAnchor(fAnchor)&&!isCardinalAnchor(fSide,fAnchor)?{fromAnchor:fAnchor}:{}),...(isCanvasAnchor(tAnchor)&&!isCardinalAnchor(tSide,tAnchor)?{toAnchor:tAnchor}:{}),...(lineType&&lineType!=='polyline'?{lineType}:{})};
   const byId=new Map(nodes.map(n=>[n.id,n]));byId.set(fixed.id,fixed);byId.set(target.id,target);
   return routeConnections([...byId.values()],[edge],{scope:'connection-preview'})[0]||null;
 }
-export function connectionDisplayPath(points,radius=8,nodes=[]){
-  if(!points?.length)return '';
-  let path='M'+points[0].join(',');
-  for(let i=1;i<points.length-1;i++){
-    const a=points[i-1],b=points[i],c=points[i+1],before=Math.hypot(b[0]-a[0],b[1]-a[1]),after=Math.hypot(c[0]-b[0],c[1]-b[1]);
-    let r=Math.max(0,Math.min(radius,before/2,after/2));
-    if(!before||!after||a[0]===b[0]&&b[0]===c[0]||a[1]===b[1]&&b[1]===c[1])r=0;
-    if(!r){path+=' L'+b.join(',');continue;}
-    const start=b.map((v,axis)=>v+(a[axis]-v)/before*r),end=b.map((v,axis)=>v+(c[axis]-v)/after*r),box={x:Math.min(start[0],end[0]),y:Math.min(start[1],end[1]),right:Math.max(start[0],end[0]),bottom:Math.max(start[1],end[1])};
-    const blocked=nodes.some(n=>!isBranch(n)&&box.x<n.x+canvasNodeWidth(n)&&box.right>n.x&&box.y<n.y+canvasNodeHeight(n)&&box.bottom>n.y);
-    path+=blocked?' L'+b.join(','):' L'+start.join(',')+' Q'+b.join(',')+' '+end.join(',');
+function polylineCornerRadius(a,b,c,radius=8,nodes=[]){
+  const before=Math.hypot(b[0]-a[0],b[1]-a[1]),after=Math.hypot(c[0]-b[0],c[1]-b[1]);
+  let r=Math.max(0,Math.min(radius,before/2,after/2));
+  if(!before||!after||a[0]===b[0]&&b[0]===c[0]||a[1]===b[1]&&b[1]===c[1])return null;
+  if(!r)return null;
+  const start=b.map((v,axis)=>v+(a[axis]-v)/before*r),end=b.map((v,axis)=>v+(c[axis]-v)/after*r),box={x:Math.min(start[0],end[0]),y:Math.min(start[1],end[1]),right:Math.max(start[0],end[0]),bottom:Math.max(start[1],end[1])};
+  const blocked=nodes.some(n=>!isBranch(n)&&box.x<n.x+canvasNodeWidth(n)&&box.right>n.x&&box.y<n.y+canvasNodeHeight(n)&&box.bottom>n.y);
+  return blocked?null:{start,end};
+}
+export function connectionPathSamples(points,radius=8,nodes=[],lineType='polyline'){
+  if(!points?.length)return [];
+  if(lineType==='straight')return points.length>=2?[points[0],points.at(-1)]:[points[0]];
+  if(lineType==='curve'&&points.length>=4&&(points.length-1)%3===0){
+    const samples=[points[0]];
+    for(let i=1;i<points.length;i+=3){
+      const p0=points[i-1],p1=points[i],p2=points[i+1],p3=points[i+2];
+      for(let step=1;step<=16;step++){const u=step/16,v=1-u;samples.push([v*v*v*p0[0]+3*v*v*u*p1[0]+3*v*u*u*p2[0]+u*u*u*p3[0],v*v*v*p0[1]+3*v*v*u*p1[1]+3*v*u*u*p2[1]+u*u*u*p3[1]]);}
+    }
+    return samples;
   }
-  return points.length>1?path+' L'+points.at(-1).join(','):path;
+  const samples=[points[0]];
+  for(let i=1;i<points.length-1;i++){
+    const a=points[i-1],b=points[i],c=points[i+1],arc=polylineCornerRadius(a,b,c,radius,nodes);
+    if(!arc){samples.push(b);continue;}
+    samples.push(arc.start);
+    for(let step=1;step<=6;step++){const u=step/6,v=1-u;samples.push([v*v*arc.start[0]+2*v*u*b[0]+u*u*arc.end[0],v*v*arc.start[1]+2*v*u*b[1]+u*u*arc.end[1]]);}
+  }
+  if(points.length>1)samples.push(points.at(-1));
+  return samples;
+}
+function pathArcLengths(samples){
+  const lengths=[0];let total=0;
+  for(let i=1;i<samples.length;i++){total+=Math.hypot(samples[i][0]-samples[i-1][0],samples[i][1]-samples[i-1][1]);lengths.push(total);}
+  return {lengths,total};
+}
+export function connectionPathPointAt(samples,t=.5){
+  if(!samples?.length)return null;
+  if(samples.length===1)return {point:[samples[0][0],samples[0][1]],angle:0,segmentIndex:0,total:0};
+  const {lengths,total}=pathArcLengths(samples),clamped=Math.max(0,Math.min(1,t));
+  if(total<=1e-6)return {point:[samples[0][0],samples[0][1]],angle:0,segmentIndex:0,total:0};
+  const target=total*clamped;
+  for(let i=0;i<samples.length-1;i++){
+    const len=lengths[i+1]-lengths[i];
+    if(len>1e-6&&(target<=lengths[i+1]+1e-6||i===samples.length-2)){
+      const u=Math.max(0,Math.min(1,(target-lengths[i])/len)),a=samples[i],b=samples[i+1];
+      return {point:[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u],angle:Math.atan2(b[1]-a[1],b[0]-a[0]),segmentIndex:i,total};
+    }
+  }
+  const last=samples.at(-1),prev=samples.at(-2);
+  return {point:[last[0],last[1]],angle:Math.atan2(last[1]-prev[1],last[0]-prev[0]),segmentIndex:samples.length-2,total};
+}
+export function connectionPathProject(samples,target){
+  if(!samples?.length||!target)return null;
+  if(samples.length===1)return {point:[samples[0][0],samples[0][1]],t:0,distance:Math.hypot(target[0]-samples[0][0],target[1]-samples[0][1]),total:0,segmentIndex:0};
+  const {lengths,total}=pathArcLengths(samples);
+  if(total<=1e-6)return {point:[samples[0][0],samples[0][1]],t:0,distance:Math.hypot(target[0]-samples[0][0],target[1]-samples[0][1]),total:0,segmentIndex:0};
+  let best={point:[samples[0][0],samples[0][1]],t:.5,distance:Infinity,total,segmentIndex:0};
+  for(let i=0;i<samples.length-1;i++){
+    const a=samples[i],b=samples[i+1],dx=b[0]-a[0],dy=b[1]-a[1],lenSq=dx*dx+dy*dy;
+    if(lenSq<=1e-9)continue;
+    const u=Math.max(0,Math.min(1,((target[0]-a[0])*dx+(target[1]-a[1])*dy)/lenSq)),pt=[a[0]+dx*u,a[1]+dy*u],dist=Math.hypot(pt[0]-target[0],pt[1]-target[1]);
+    if(dist<best.distance){const len=Math.sqrt(lenSq);best={point:pt,t:Math.max(0,Math.min(1,(lengths[i]+len*u)/total)),distance:dist,total,segmentIndex:i};}
+  }
+  return best;
+}
+function segmentIntersectionPoint(a1,a2,b1,b2){
+  const dx1=a2[0]-a1[0],dy1=a2[1]-a1[1],dx2=b2[0]-b1[0],dy2=b2[1]-b1[1],denom=dx1*dy2-dy1*dx2;
+  if(Math.abs(denom)<=1e-6)return null;
+  const rx=b1[0]-a1[0],ry=b1[1]-a1[1],t=(rx*dy2-ry*dx2)/denom,u=(rx*dy1-ry*dx1)/denom;
+  if(t<=1e-4||t>=1-1e-4||u<=1e-4||u>=1-1e-4)return null;
+  return {t,point:[a1[0]+dx1*t,a1[1]+dy1*t]};
+}
+function crossPolySegments(line,nodes){
+  const type=line?.route?.lineType||'polyline',pts=line?.route?.points||[];
+  const verts=type==='curve'?connectionPathSamples(pts,8,nodes,'curve'):type==='straight'&&pts.length>=2?[pts[0],pts.at(-1)]:pts;
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(const [x,y] of verts){if(x<minX)minX=x;if(y<minY)minY=y;if(x>maxX)maxX=x;if(y>maxY)maxY=y;}
+  return {verts,bbox:[minX,minY,maxX,maxY],isPoly:type==='polyline',bends:type==='polyline'?pts.slice(1,-1):[]};
+}
+// 飞书风格跨线跳弧：上层折线/直线越过下层连线时自动产生 r=6 半圆跨桥并合并邻近交叉为胶囊桥。
+export function connectionCrossArcs(lines,nodes=[],labels=null,{radius=6,endMargin=16,bendMargin=16}={}){
+  const result=new Map(),valid=(lines||[]).filter(l=>l?.route&&!l.route.blocked&&Array.isArray(l.route.points)&&l.route.points.length>=2);
+  if(valid.length<2)return result;
+  const ordered=[...valid].sort((a,b)=>((a.route.lineType==='curve'?0:1)-(b.route.lineType==='curve'?0:1)));
+  const geom=ordered.map(line=>crossPolySegments(line,nodes));
+  const nearPt=(pts,p,d)=>pts.some(v=>Math.hypot(v[0]-p[0],v[1]-p[1])<d);
+  for(let j=1;j<ordered.length;j++){
+    const gj=geom[j],line=ordered[j],vj=gj.verts;if(vj.length<2)continue;
+    const ownBox=labels?.get?.(line.edge.id)?.box||null,segCross=new Map();
+    for(let i=0;i<j;i++){
+      const gi=geom[i],vi=gi.verts;if(vi.length<2)continue;
+      if(gj.bbox[2]+radius<gi.bbox[0]||gj.bbox[0]-radius>gi.bbox[2]||gj.bbox[3]+radius<gi.bbox[1]||gj.bbox[1]-radius>gi.bbox[3])continue;
+      for(let sj=0;sj<vj.length-1;sj++){
+        const a1=vj[sj],a2=vj[sj+1],segLen=Math.hypot(a2[0]-a1[0],a2[1]-a1[1]);
+        if(segLen<radius*2+4)continue;
+        for(let si=0;si<vi.length-1;si++){
+          const hit=segmentIntersectionPoint(a1,a2,vi[si],vi[si+1]);
+          if(!hit)continue;
+          const p=hit.point,s=hit.t*segLen;
+          if(Math.hypot(p[0]-vj[0][0],p[1]-vj[0][1])<endMargin||Math.hypot(p[0]-vj.at(-1)[0],p[1]-vj.at(-1)[1])<endMargin)continue;
+          if(gj.isPoly&&nearPt(gj.bends,p,bendMargin))continue;
+          if(gi.isPoly&&nearPt(gi.bends,p,bendMargin))continue;
+          if(ownBox&&p[0]>=ownBox.x-4&&p[0]<=ownBox.x+ownBox.width+4&&p[1]>=ownBox.y-4&&p[1]<=ownBox.y+ownBox.height+4)continue;
+          if(!segCross.has(sj))segCross.set(sj,[]);
+          segCross.get(sj).push(s);
+        }
+      }
+    }
+    if(!segCross.size)continue;
+    const grouped=new Map();
+    for(const [sj,list] of segCross){
+      const a1=vj[sj],a2=vj[sj+1],segLen=Math.hypot(a2[0]-a1[0],a2[1]-a1[1]);
+      const minS=sj===0?endMargin:(gj.isPoly?10:radius),maxS=segLen-(sj===vj.length-2?endMargin:(gj.isPoly?10:radius));
+      if(maxS-minS<4)continue;
+      const intervals=list.slice().sort((x,y)=>x-y).map(s=>[Math.max(minS,s-radius),Math.min(maxS,s+radius)]).filter(([lo,hi])=>hi-lo>=4);
+      const merged=[];
+      for(const iv of intervals){if(merged.length&&iv[0]<=merged.at(-1)[1]+2)merged.at(-1)[1]=Math.max(merged.at(-1)[1],iv[1]);else merged.push([...iv]);}
+      if(merged.length)grouped.set(sj,merged);
+    }
+    if(grouped.size)result.set(line.edge.id,grouped);
+  }
+  return result;
+}
+function emitCrossSegment(a,b,startDist,endDist,intervals,radius=6){
+  const dx=b[0]-a[0],dy=b[1]-a[1],len=Math.hypot(dx,dy),round=n=>Math.round(n*10)/10;
+  if(len<=1e-6||endDist<=startDist+1e-6)return '';
+  const ux=dx/len,uy=dy/len;
+  const usable=(intervals||[]).map(([lo,hi])=>[Math.max(lo,startDist+0.5),Math.min(hi,endDist-0.5)]).filter(([lo,hi])=>hi-lo>=4);
+  if(!usable.length)return ' L'+round(a[0]+ux*endDist)+','+round(a[1]+uy*endDist);
+  const pA=[uy,-ux],pB=[-uy,ux],n=Math.abs(ux)>=Math.abs(uy)?(pA[1]<0?pA:pB):(pA[0]>0?pA:pB),sweep=(uy*n[0]-ux*n[1])>0?1:0;
+  const pt=(s,off=0)=>[round(a[0]+ux*s+n[0]*off),round(a[1]+uy*s+n[1]*off)];
+  let out='';
+  for(const [lo,hi] of usable){
+    const r=Math.min(radius,(hi-lo)/2);
+    out+=' L'+pt(lo).join(',');
+    if(hi-lo>2*radius+0.8)out+=' A'+radius+','+radius+' 0 0,'+sweep+' '+pt(lo+radius,radius).join(',')+' L'+pt(hi-radius,radius).join(',')+' A'+radius+','+radius+' 0 0,'+sweep+' '+pt(hi).join(',');
+    else out+=' A'+round(r)+','+round(r)+' 0 0,'+sweep+' '+pt(hi).join(',');
+  }
+  return out+' L'+pt(endDist).join(',');
+}
+export function connectionDisplayPath(points,radius=8,nodes=[],lineType='polyline',crossings=null){
+  if(!points?.length)return '';
+  const hasCross=crossings&&crossings.size>0;
+  if(lineType==='curve'&&points.length>=4&&(points.length-1)%3===0){
+    if(hasCross){
+      const samples=connectionPathSamples(points,radius,nodes,'curve');
+      let path='M'+samples[0].join(',');
+      for(let i=0;i<samples.length-1;i++){const len=Math.hypot(samples[i+1][0]-samples[i][0],samples[i+1][1]-samples[i][1]);path+=emitCrossSegment(samples[i],samples[i+1],0,len,crossings.get(i),6);}
+      return path;
+    }
+    let path='M'+points[0].join(',');
+    for(let i=1;i<points.length;i+=3)path+=' C'+points[i].join(',')+' '+points[i+1].join(',')+' '+points[i+2].join(',');
+    return path;
+  }
+  if(lineType==='straight'&&points.length>=2){
+    if(hasCross){const a=points[0],b=points.at(-1),len=Math.hypot(b[0]-a[0],b[1]-a[1]);return 'M'+a.join(',')+emitCrossSegment(a,b,0,len,crossings.get(0),6);}
+    return 'M'+points[0].join(',')+' L'+points.at(-1).join(',');
+  }
+  let path='M'+points[0].join(','),trimStart=0;
+  for(let i=1;i<points.length-1;i++){
+    const a=points[i-1],b=points[i],len=Math.hypot(b[0]-a[0],b[1]-a[1]),arc=polylineCornerRadius(a,b,points[i+1],radius,nodes);
+    const trimEnd=arc?Math.hypot(b[0]-arc.start[0],b[1]-arc.start[1]):0,segsCross=hasCross?crossings.get(i-1):null;
+    if(segsCross?.length)path+=emitCrossSegment(a,b,trimStart,len-trimEnd,segsCross,6);
+    else path+=' L'+(arc?arc.start:b).join(',');
+    if(arc){path+=' Q'+b.join(',')+' '+arc.end.join(',');trimStart=Math.hypot(arc.end[0]-b[0],arc.end[1]-b[1]);}
+    else trimStart=0;
+  }
+  if(points.length>1){
+    const a=points[points.length-2],b=points.at(-1),len=Math.hypot(b[0]-a[0],b[1]-a[1]),segsCross=hasCross?crossings.get(points.length-2):null;
+    if(segsCross?.length)path+=emitCrossSegment(a,b,trimStart,len,segsCross,6);
+    else path+=' L'+b.join(',');
+  }
+  return path;
 }
 // 建线只改变关系；用户摆好的页面和已选端点不参与自动排布。
-export function connectNodes(model,from,to,fromSide,toSide){
+export function connectNodes(model,from,to,fromSide,toSide,{fromAnchor=null,toAnchor=null,lineType='polyline',lineStyle='solid',arrow='end'}={}){
   if(from===to||![from,to].every(id=>model.nodes.some(n=>n.id===id))||![fromSide,toSide].every(side=>connectionSides.includes(side)))return null;
   const diagram=[from,to].some(id=>isBranch(model.nodes.find(n=>n.id===id))),id=uid('edge');
-  model.edges.push({id,from,to,fromSide,toSide,label:diagram?'':'继续',trigger:'next',description:'',...(diagram?{diagram:true}:{})});return id;
+  model.edges.push({id,from,to,fromSide,toSide,label:diagram?'':'继续',trigger:'next',description:'',...(diagram?{diagram:true}:{}),...(isCanvasAnchor(fromAnchor)&&!isCardinalAnchor(fromSide,fromAnchor)?{fromAnchor:[...fromAnchor]}:{}),...(isCanvasAnchor(toAnchor)&&!isCardinalAnchor(toSide,toAnchor)?{toAnchor:[...toAnchor]}:{}),...(connectionLineTypes.includes(lineType)&&lineType!=='polyline'?{lineType}:{}),...(connectionLineStyles.includes(lineStyle)&&lineStyle!=='solid'?{lineStyle}:{}),...(connectionArrowModes.includes(arrow)&&arrow!=='end'?{arrow}:{})});return id;
+}
+export function reverseConnection(model,edgeIds){
+  const list=Array.isArray(edgeIds)?edgeIds:[edgeIds],targets=model.edges.filter(e=>list.includes(e.id));
+  if(!targets.length||targets.some(e=>e.canvasFrom||[e.from,e.to].some(id=>isBranch(model.nodes.find(n=>n.id===id)))))return null;
+  let cleared=false;
+  for(const e of targets){
+    if(e.selector||e.rect)cleared=true;
+    [e.from,e.to]=[e.to,e.from];
+    const fs=e.fromSide,ts=e.toSide,fa=e.fromAnchor,ta=e.toAnchor;
+    if(ts)e.fromSide=ts;else delete e.fromSide;
+    if(fs)e.toSide=fs;else delete e.toSide;
+    if(ta)e.fromAnchor=[...ta];else delete e.fromAnchor;
+    if(fa)e.toAnchor=[...fa];else delete e.toAnchor;
+    if(Array.isArray(e.waypoints))e.waypoints=e.waypoints.slice().reverse().map(p=>[...p]);
+    if(typeof e.labelT==='number'&&Number.isFinite(e.labelT))e.labelT=Math.round((1-e.labelT)*10000)/10000;
+    delete e.labelPosition;delete e.selector;delete e.rect;delete e.imagePath;delete e.trigger;
+  }
+  return {reversed:targets.length,cleared};
 }
 export function snapNodePosition(node,point,others,tolerance=8){
   const result={x:point[0],y:point[1],guides:[]},matches=[];if(tolerance<=0)return result;
@@ -162,10 +375,25 @@ export function moveCanvasNodes(model,moduleId,positions){
       Object.assign(owner,{x:owner.x+delta[0],y:owner.y+delta[1]});deltas.set(junction.id,delta);grew=true;
     }
   }
-  // 整组平移时，组内手动折点和文字一起平移；单独移动端点时保留手动经过点。
-  for(const edge of overviewEdges(model)){const a=deltas.get(edge.from),b=deltas.get(edge.to);if(!a||!b||a[0]!==b[0]||a[1]!==b[1])continue;const owner=model.edges.find(e=>e.id===edge.id);
-    if(Array.isArray(owner.waypoints))owner.waypoints=owner.waypoints.map(([x,y])=>[x+a[0],y+a[1]]);
-    if(Array.isArray(owner.labelPosition))owner.labelPosition=[owner.labelPosition[0]+a[0],owner.labelPosition[1]+a[1]];
+  // 整组平移时，组内手动折点和文字一起平移；单独移动一端时，尽量保持中间已调折点不变，只衔接端点邻段。
+  const movedById=new Map(moduleNodes(model,moduleId).map(n=>[n.id,n]));
+  for(const edge of overviewEdges(model)){
+    const a=deltas.get(edge.from),b=deltas.get(edge.to),owner=model.edges.find(e=>e.id===edge.id);
+    if(!owner||!a&&!b)continue;
+    if(a&&b&&a[0]===b[0]&&a[1]===b[1]){
+      if(Array.isArray(owner.waypoints))owner.waypoints=owner.waypoints.map(([x,y])=>[x+a[0],y+a[1]]);
+      if(Array.isArray(owner.labelPosition))owner.labelPosition=[owner.labelPosition[0]+a[0],owner.labelPosition[1]+a[1]];
+      continue;
+    }
+    if(Array.isArray(owner.waypoints)&&owner.waypoints.length>=2&&(!owner.lineType||owner.lineType==='polyline')){
+      const fromNode=movedById.get(edge.from),toNode=movedById.get(edge.to);
+      if(fromNode&&toNode){
+        const [fromSide,toSide]=connectionDirections(owner,fromNode,toNode);
+        const start=connectionPoint(fromNode,fromSide,owner.fromAnchor),end=connectionPoint(toNode,toSide,owner.toAnchor);
+        const adapted=adaptManualPolylineOnNodeMove([start,...owner.waypoints,end],start,end,fromSide,toSide);
+        if(adapted)owner.waypoints=adapted.slice(1,-1);
+      }
+    }
   }
   return [...deltas.keys()];
 }
@@ -235,43 +463,51 @@ export function pasteCanvasSelection(model,moduleId,clipboard,point=[80,80],{rec
   model.nodes.push(...nodes);model.edges.push(...edges);model.annotations.push(...annotations);
   const module=model.modules.find(m=>m.id===moduleId);module.entry??=nodes.find(n=>!isDeletedNode(model,n)&&n.overview!==false&&!isBranch(n))?.id;return nodes.map(n=>n.id);
 }
-export function reconnectEdge(model,id,endpoint,nodeId,side,fixedSide) {
+export function reconnectEdge(model,id,endpoint,nodeId,side,fixedSide,anchor=null) {
   const edge=model.edges.find(e=>e.id===id),destination=model.nodes.find(n=>n.id===nodeId);
   if(!edge||!destination||!['from','to'].includes(endpoint)||!connectionSides.includes(side)||edge[endpoint==='from'?'to':'from']===nodeId)return false;
   if(endpoint==='from'&&isBranch(destination)&&!isBranch(model.nodes.find(n=>n.id===edge.from)))edge.canvasFrom=nodeId;
   else {if(endpoint==='from'){delete edge.canvasFrom;if(edge.from!==nodeId){delete edge.selector;delete edge.rect;delete edge.imagePath;edge.trigger='next';}}edge[endpoint]=nodeId;}
   delete edge.waypoints;
   edge[endpoint+'Side']=side;
+  const anchorKey=endpoint+'Anchor';
+  if(isCanvasAnchor(anchor)&&!isCardinalAnchor(side,anchor))edge[anchorKey]=[...anchor];else delete edge[anchorKey];
   if(connectionSides.includes(fixedSide))edge[endpoint==='from'?'toSide':'fromSide']=fixedSide;
   if(isBranch(model.nodes.find(n=>n.id===edge.from))||isBranch(model.nodes.find(n=>n.id===edge.to)))edge.diagram=true;
   else delete edge.diagram;
   normalizeBranchJunctions(model);
   return true;
 }
-// 控件位于实际折线的最长线段中间，不采用已偏移的文字位置。
-export function lineBranchSplit(points,near=null){
+// 控件默认要求正交线段；显式 allowDiagonal=true 时支持直线与曲线采样段拆分。
+export function lineBranchSplit(points,near=null,allowDiagonal=false){
   if(!Array.isArray(points)||points.length<2||!points.every(isCanvasPoint))return null;
   let index=0,longest=0,distance=Infinity,chosen;
-  for(let i=0;i<points.length-1;i++){const a=points[i],b=points[i+1];if(a[0]!==b[0]&&a[1]!==b[1])return null;const length=Math.hypot(b[0]-a[0],b[1]-a[1]);if(!length)continue;
-    if(near&&isCanvasPoint(near)){const point=a.map((v,axis)=>Math.max(Math.min(v,b[axis]),Math.min(Math.max(v,b[axis]),near[axis]))),d=Math.hypot(point[0]-near[0],point[1]-near[1]);if(d<distance){distance=d;index=i;chosen=point;longest=length;}}
-    else if(length>longest){index=i;longest=length;}
+  for(let i=0;i<points.length-1;i++){
+    const a=points[i],b=points[i+1],dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);if(!allowDiagonal&&dx&&dy)return null;if(!length)continue;
+    if(near&&isCanvasPoint(near)){
+      const t=Math.max(0,Math.min(1,((near[0]-a[0])*dx+(near[1]-a[1])*dy)/(length*length)));
+      const point=[a[0]+dx*t,a[1]+dy*t],d=Math.hypot(point[0]-near[0],point[1]-near[1]);
+      if(d<distance){distance=d;index=i;chosen=point;longest=length;}
+    }else if(length>longest){index=i;longest=length;}
   }
   if(!longest)return null;
-  const a=points[index],b=points[index+1],point=chosen||[(a[0]+b[0])/2,(a[1]+b[1])/2],side=b[0]===a[0]?(b[1]>a[1]?'bottom':'top'):(b[0]>a[0]?'right':'left');
+  const a=points[index],b=points[index+1],dx=b[0]-a[0],dy=b[1]-a[1],point=chosen||[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const side=Math.abs(dx)>=Math.abs(dy)?(dx>=0?'right':'left'):(dy>=0?'bottom':'top');
   return {point,side,before:[...points.slice(0,index+1).map(p=>[...p]),point],after:[point,...points.slice(index+1).map(p=>[...p])]};
 }
 export function createLineBranch(model,edgeId,targetId,point,targetSide='top',route=null) {
   const edge=model.edges.find(e=>e.id===edgeId),target=model.nodes.find(n=>n.id===targetId);
   if(!edge||!target||!Array.isArray(point)||point.length!==2||!point.every(Number.isFinite)||!connectionSides.includes(targetSide))return null;
-  const split=route&&lineBranchSplit(route.points,point);if(route&&(!split||split.point.some((v,i)=>Math.abs(v-point[i])>1e-6)||![route.fromSide,route.toSide].every(side=>connectionSides.includes(side))||route.branchSide&&!connectionSides.includes(route.branchSide)||route.from&&!model.nodes.some(n=>n.id===route.from)||route.module&&!model.modules.some(m=>m.id===route.module)))return null;
+  const split=route&&lineBranchSplit(route.points,point,!!route.allowDiagonal);if(route&&(!split||split.point.some((v,i)=>Math.abs(v-point[i])>1e-6)||![route.fromSide,route.toSide].every(side=>connectionSides.includes(side))||route.branchSide&&!connectionSides.includes(route.branchSide)||route.from&&!model.nodes.some(n=>n.id===route.from)||route.module&&!model.modules.some(m=>m.id===route.module)))return null;
   const related=route?.edgeIds?model.edges.filter(e=>route.edgeIds.includes(e.id)):[edge],display=new Map(overviewEdges(model).map(e=>[e.id,e])),shown=display.get(edgeId),key=e=>e&&JSON.stringify([e.from,e.to,e.condition||e.label,e.fromSide,e.toSide]);
   if(!related.includes(edge)||related.some(e=>key(display.get(e.id))!==key(shown)))return null;
   let group=!split&&[edge.to,edge.canvasFrom,edge.from].map(id=>model.nodes.find(n=>n.id===id)).find(isBranch);
   if(group?.id===targetId)return null;
   if(!group){const origin=model.nodes.find(n=>n.id===edge.from),destination=model.nodes.find(n=>n.id===edge.to);if(!origin||!destination)return null;
     group={id:uid('branch'),module:route?.module||origin.module,title:split?'':'分支条件',kind:'note',presentation:'branch',width:16,height:16,x:point[0]-8,y:point[1]-8,description:''};model.nodes.push(group);
-    const [heading,arrival]=route?[route.fromSide,route.toSide]:connectionDirections(edge,origin,destination),opposite={top:'bottom',bottom:'top',left:'right',right:'left'},trunk={id:uid('edge'),from:route?.from||edge.canvasFrom||edge.from,to:group.id,fromSide:heading,toSide:opposite[split?.side||heading],label:'',diagram:true,description:''};
-    if(split){trunk.waypoints=split.before.slice(1,-1);for(const item of related){item.waypoints=split.after.slice(1,-1).map(p=>[...p]);item.fromSide=split.side;item.toSide=arrival;if(!item.labelPosition&&isCanvasPoint(route.labelPosition))item.labelPosition=[...route.labelPosition];}}
+    const [heading,arrival]=route?[route.fromSide,route.toSide]:connectionDirections(edge,origin,destination),opposite={top:'bottom',bottom:'top',left:'right',right:'left'},trunk={id:uid('edge'),from:route?.from||edge.canvasFrom||edge.from,to:group.id,fromSide:heading,toSide:opposite[split?.side||heading],label:'',diagram:true,description:'',...(isCanvasAnchor(edge.fromAnchor)?{fromAnchor:[...edge.fromAnchor]}:{})};
+    const isOrtho=pts=>pts.length>=2&&pts.slice(1).every((p,i)=>p[0]===pts[i][0]||p[1]===pts[i][1]);
+    if(split&&isOrtho(split.before)&&isOrtho(split.after)){trunk.waypoints=split.before.slice(1,-1);for(const item of related){item.waypoints=split.after.slice(1,-1).map(p=>[...p]);item.fromSide=split.side;item.toSide=arrival;delete item.fromAnchor;if(item.labelT===undefined&&Number.isFinite(route.labelT))item.labelT=route.labelT;}}
     model.edges.push(trunk);for(const item of related)item.canvasFrom=group.id;
   }
   const id=uid('edge');model.edges.push({id,from:group.id,to:targetId,fromSide:route?.branchSide||connectionDirections({},group,target)[0],toSide:targetSide,label:'',description:'',diagram:true});
@@ -287,120 +523,104 @@ export function canvasSections(model,moduleId){
   const left=Math.min(...nodes.map(n=>n.x))-24,right=Math.max(...nodes.map(n=>n.x+canvasNodeWidth(n)))+24;
   return sections.map(section=>{const members=nodes.filter(n=>n.section===section.id);if(!members.length)return null;const top=Math.min(...members.map(n=>n.y))-58,bottom=Math.max(...members.map(n=>n.y+canvasNodeHeight(n)))+24;return {...section,x:left,y:top,width:right-left,height:bottom-top};}).filter(Boolean);
 }
-const segmentHits=(u,v,r)=>u[0]===v[0]?u[0]>r.x&&u[0]<r.x+r.width&&Math.max(u[1],v[1])>r.y&&Math.min(u[1],v[1])<r.y+r.height:u[1]>r.y&&u[1]<r.y+r.height&&Math.max(u[0],v[0])>r.x&&Math.min(u[0],v[0])<r.x+r.width;
-// 简单折线无路可走时，在障碍边缘的正交网格上找路。
-function obstacleRoute(start,end,obstacles,fromVector,toVector){
-  const xs=[...new Set([start[0],end[0],...obstacles.flatMap(r=>[r.x-16,r.x+r.width+16])])].sort((a,b)=>a-b),ys=[...new Set([start[1],end[1],...obstacles.flatMap(r=>[r.y-16,r.y+r.height+16])])].sort((a,b)=>a-b);
-  const width=xs.length,source=ys.indexOf(start[1])*width+xs.indexOf(start[0]),target=ys.indexOf(end[1])*width+xs.indexOf(end[0]),point=id=>[xs[id%width],ys[Math.floor(id/width)]],heap=[],distances=new Map(),parents=new Map();
-  const push=item=>{let i=heap.length;heap.push(item);while(i){const p=(i-1)>>1;if(heap[p].score<=item.score)break;heap[i]=heap[p];i=p;}heap[i]=item;};
-  const pop=()=>{const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1].score<heap[c].score)c++;if(heap[c].score>=last.score)break;heap[i]=heap[c];i=c;}heap[i]=last;}return first;};
-  const axis=fromVector[0]?0:1,key=source*2+axis;distances.set(key,0);push({id:source,axis,key,cost:0,score:0});
-  while(heap.length){const state=pop();if(state.cost!==distances.get(state.key))continue;const u=point(state.id);
-    if(state.id===target){const points=[];let k=state.key;while(k!==undefined){points.push(point(Math.floor(k/2)));k=parents.get(k);}return points.reverse();}
-    const x=state.id%width,y=Math.floor(state.id/width);
-    for(const [nx,ny,nextAxis] of [[x-1,y,0],[x+1,y,0],[x,y-1,1],[x,y+1,1]]){
-      if(nx<0||nx>=width||ny<0||ny>=ys.length)continue;const id=ny*width+nx,v=point(id);
-      if(state.id===source&&(v[0]-u[0])*fromVector[0]+(v[1]-u[1])*fromVector[1]<0||id===target&&(u[0]-v[0])*toVector[0]+(u[1]-v[1])*toVector[1]<0||obstacles.some(r=>segmentHits(u,v,r)))continue;
-      const cost=state.cost+Math.abs(v[0]-u[0])+Math.abs(v[1]-u[1])+(nextAxis===state.axis?0:24),key=id*2+nextAxis;
-      if(cost>=(distances.get(key)??Infinity))continue;distances.set(key,cost);parents.set(key,state.key);push({id,axis:nextAxis,key,cost,score:cost+Math.abs(v[0]-end[0])+Math.abs(v[1]-end[1])});
-    }
-  }
-  return null;
-}
 export function connectionRoute(start,end,fromSide,toSide,obstacles=[],flexible=false) {
-  const vectors={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]},a=vectors[fromSide],b=vectors[toSide],sourceLength=connectionJetty(start,end,fromSide,flexible),targetLength=connectionJetty(end,start,toSide,flexible);
-  const s=[start[0]+a[0]*sourceLength,start[1]+a[1]*sourceLength],t=[end[0]+b[0]*targetLength,end[1]+b[1]*targetLength];
-  const candidates=[[start,s,t,end],[start,s,[t[0],s[1]],t,end],[start,s,[s[0],t[1]],t,end]];
-  if(start[0]===end[0]||start[1]===end[1])candidates.push([start,end]);
-  const midX=(s[0]+t[0])/2,midY=(s[1]+t[1])/2;
-  const xs=[midX,midX-24,midX+24,...obstacles.flatMap(r=>[r.x-16,r.x+r.width+16])],ys=[midY,midY-24,midY+24,...obstacles.flatMap(r=>[r.y-16,r.y+r.height+16])];
-  for(const x of xs)candidates.push([start,s,[x,s[1]],[x,t[1]],t,end]);
-  for(const y of ys)candidates.push([start,s,[s[0],y],[t[0],y],t,end]);
-  const compact=points=>{const out=[];for(const p of points){const last=out.at(-1);if(last&&last[0]===p[0]&&last[1]===p[1])continue;out.push(p);while(out.length>2){const [u,v,w]=out.slice(-3);if((u[0]===v[0]&&v[0]===w[0]||u[1]===v[1]&&v[1]===w[1])&&(v[0]-u[0])*(w[0]-v[0])+(v[1]-u[1])*(w[1]-v[1])>=0)out.splice(-2,1);else break;}}return out;};
-  let best=null,bestScore=Infinity;
-  for(const candidate of candidates){const points=compact(candidate);if(points.length<2)continue;const first=points[1],last=points.at(-2);if((first[0]-start[0])*a[0]+(first[1]-start[1])*a[1]<=0||(last[0]-end[0])*b[0]+(last[1]-end[1])*b[1]<=0)continue;
-    let length=0,crossings=0,valid=true;
-    for(let i=1;i<points.length;i++){const u=points[i-1],v=points[i];if(u[0]!==v[0]&&u[1]!==v[1]){valid=false;break;}length+=Math.abs(v[0]-u[0])+Math.abs(v[1]-u[1]);for(const r of obstacles)if(segmentHits(u,v,r))crossings++;}
-    const score=crossings*1e6+length+(points.length-2)*24;if(valid&&score<bestScore){best=points;bestScore=score;}
-  }
-  if(!best||best.some((v,i)=>i&&obstacles.some(r=>segmentHits(best[i-1],v,r)))){const detour=obstacleRoute(s,t,obstacles,a,b);if(detour)best=compact([start,...detour,end]);}
-  const points=best||compact([start,s,[t[0],s[1]],t,end]);
-  if(points.slice(1).some((p,i)=>obstacles.some(r=>segmentHits(points[i],p,r))))return {points:[],path:'',label:start,blocked:true};
-  let segment=[points[0],points[1]],longest=0;for(let i=1;i<points.length;i++){const u=points[i-1],v=points[i],length=Math.abs(u[0]-v[0])+Math.abs(u[1]-v[1]);if(length>longest){segment=[u,v];longest=length;}}
-  return {points,path:points.map((p,i)=>(i?'L':'M')+p.join(',')).join(' '),label:[(segment[0][0]+segment[1][0])/2+8,(segment[0][1]+segment[1][1])/2-8]};
+  return routingFeishuOrthogonal(start,end,fromSide,toSide,null,null,obstacles.map(r=>({x:r.x,y:r.y,w:r.width,h:r.height})),flexible);
 }
 export const connectionPath = (...args) => connectionRoute(...args).path;
 const isCanvasPoint=point=>Array.isArray(point)&&point.length===2&&point.every(Number.isFinite);
 function manualConnectionRoute(start,end,fromSide,toSide,waypoints,fromBranch=false,toBranch=false){
-  const vectors={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]},a=vectors[fromSide],b=vectors[toSide];
-  const stub=(p,v,near)=>{const delta=[near[0]-p[0],near[1]-p[1]],distance=delta[0]*v[0]+delta[1]*v[1];return distance>=0&&distance<32&&delta[0]*v[1]===delta[1]*v[0]?[...near]:[p[0]+v[0]*32,p[1]+v[1]*32];};
-  const s=fromBranch?start:stub(start,a,waypoints[0]||end),t=toBranch?end:stub(end,b,waypoints.at(-1)||start),points=fromBranch?[start]:[start,s];
-  const append=(target,axis)=>{const previous=points.at(-1);if(previous[0]!==target[0]&&previous[1]!==target[1])points.push(axis==='x'?[target[0],previous[1]]:[previous[0],target[1]]);if(points.at(-1)[0]!==target[0]||points.at(-1)[1]!==target[1])points.push([...target]);};
-  for(const point of waypoints.filter(isCanvasPoint)){const before=points.at(-2),last=points.at(-1);append(point,before?(last[1]===before[1]?'x':'y'):(a[0]?'x':'y'));}
-  // 末段从用户选定的目标侧进入，端口与页面位置每次重新计算。
-  append(t,b[0]?'y':'x');append(end,b[0]?'x':'y');
-  let segment=[start,s],longest=0;for(let i=1;i<points.length;i++){const u=points[i-1],v=points[i],length=Math.abs(v[0]-u[0])+Math.abs(v[1]-u[1]);if(length>longest){segment=[u,v];longest=length;}}
-  return {points,path:points.map((p,i)=>(i?'L':'M')+p.join(',')).join(' '),label:[(segment[0][0]+segment[1][0])/2+8,(segment[0][1]+segment[1][1])/2-8],manual:true};
+  const vectors={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]},a=vectors[fromSide],b=vectors[toSide],pts=waypoints.filter(isCanvasPoint);
+  const aligned=(p,v,q)=>{const dx=q[0]-p[0],dy=q[1]-p[1];return (dx*v[0]+dy*v[1])>0&&Math.abs(dx*v[1]-dy*v[0])<1e-6;};
+  const points=[start];
+  const needS=!fromBranch&&(pts.length?!aligned(start,a,pts[0]):true);
+  if(needS){const near=pts[0]||end,d=(near[0]-start[0])*a[0]+(near[1]-start[1])*a[1],len=d>=4&&d<32&&Math.abs((near[0]-start[0])*a[1]-(near[1]-start[1])*a[0])<1e-6?d:24;points.push([start[0]+a[0]*len,start[1]+a[1]*len]);}
+  const append=(target,axis)=>{const prev=points.at(-1);if(prev[0]!==target[0]&&prev[1]!==target[1])points.push(axis==='x'?[target[0],prev[1]]:[prev[0],target[1]]);if(points.at(-1)[0]!==target[0]||points.at(-1)[1]!==target[1])points.push([target[0],target[1]]);};
+  for(const pt of pts){const before=points.at(-2),last=points.at(-1);append(pt,before?(last[1]===before[1]?'x':'y'):(a[0]?'x':'y'));}
+  const needT=!toBranch&&(pts.length?!aligned(end,b,pts.at(-1)):true);
+  if(needT){const near=pts.at(-1)||start,d=(near[0]-end[0])*b[0]+(near[1]-end[1])*b[1],len=d>=4&&d<32&&Math.abs((near[0]-end[0])*b[1]-(near[1]-end[1])*b[0])<1e-6?d:24;append([end[0]+b[0]*len,end[1]+b[1]*len],b[0]?'y':'x');}
+  append(end,b[0]?'x':'y');
+  const clean=[];
+  for(const p of points){const last=clean.at(-1);if(last&&last[0]===p[0]&&last[1]===p[1])continue;clean.push(p);while(clean.length>2){const [u,v,w]=clean.slice(-3);if((u[0]===v[0]&&v[0]===w[0]||u[1]===v[1]&&v[1]===w[1])&&(v[0]-u[0])*(w[0]-v[0])+(v[1]-u[1])*(w[1]-v[1])>=0)clean.splice(-2,1);else break;}}
+  let segment=clean.slice(0,2),longest=0;for(let i=1;i<clean.length;i++){const u=clean[i-1],v=clean[i],length=Math.abs(v[0]-u[0])+Math.abs(v[1]-u[1]);if(length>longest){segment=[u,v];longest=length;}}
+  return {points:clean,path:clean.map((p,i)=>(i?'L':'M')+p.join(',')).join(' '),label:segment.length===2?[(segment[0][0]+segment[1][0])/2+8,(segment[0][1]+segment[1][1])/2-8]:[start[0]+8,start[1]-8],lineType:'polyline',manual:true};
 }
 export function routeConnections(nodes,edges,options={}){
-  const byId=new Map(nodes.map(n=>[n.id,n])),obstacles=nodes.filter(n=>!isBranch(n)).map(n=>({x:n.x,y:n.y,width:canvasNodeWidth(n),height:canvasNodeHeight(n)}));
-  const lines=edges.filter(e=>byId.has(e.from)&&byId.has(e.to)&&!(byId.get(e.from).reference&&byId.get(e.to).reference)).map(edge=>{const from=byId.get(edge.from),to=byId.get(edge.to),[fromSide,toSide]=connectionDirections(edge,from,to);return {edge,from,to,fromSide,toSide,start:connectionPoint(from,fromSide),end:connectionPoint(to,toSide)};});
-  const solved=solveConnections(nodes,lines,{...options,manualRoute:line=>manualConnectionRoute(line.start,line.end,line.fromSide,line.toSide,line.edge.waypoints,isBranch(line.from),isBranch(line.to)),fallbackRoute:line=>connectionRoute(line.start,line.end,line.fromSide,line.toSide,obstacles,isBranch(line.from)||isBranch(line.to))});
-  // 路径被挡住时不提交，但保留一条忽略障碍的示意线，让用户看见线在哪里、为什么不可用。
-  for(const line of solved)if(line.route.blocked)line.route.overlay=connectionRoute(line.start,line.end,line.fromSide,line.toSide,[],isBranch(line.from)||isBranch(line.to)).points;
-  return solved;
+  const byId=new Map(nodes.map(n=>[n.id,n]));
+  const lines=edges.filter(e=>byId.has(e.from)&&byId.has(e.to)&&!(byId.get(e.from).reference&&byId.get(e.to).reference)).map(edge=>{const from=byId.get(edge.from),to=byId.get(edge.to),[fromSide,toSide]=connectionDirections(edge,from,to);return {edge,from,to,fromSide,toSide,start:connectionPoint(from,fromSide,edge.fromAnchor),end:connectionPoint(to,toSide,edge.toAnchor)};});
+  return solveConnections(nodes,lines,{...options,manualRoute:line=>manualConnectionRoute(line.start,line.end,line.fromSide,line.toSide,line.edge.waypoints,isBranch(line.from),isBranch(line.to))});
 }
-// 无效的拖动不写入折点，保留上一个可用位置。
+export function connectionSegmentSnap(points,index,delta,threshold=5){
+  if(!Array.isArray(points)||!points[index]||!points[index+1]||!Number.isFinite(delta))return {delta,guide:null};
+  const axis=points[index][1]===points[index+1][1]?1:0;
+  return routingNearestAlignment(points,index,axis,delta,threshold);
+}
+// 飞书式自由拖动线段：2 点自动变 6 点 U 形，首尾按 36/16 引线拆弯，允许自由跨过卡片，不再拒绝有效手调。
 export function adjustConnectionSegment(nodes,edge,points,index,delta){
   if(!edge||!Number.isFinite(delta)||!points[index]||!points[index+1])return null;
-  const a=points[index],b=points[index+1],axis=a[1]===b[1]?1:0,first=[...a],last=[...b],from=nodes.find(n=>n.id===edge.from),to=nodes.find(n=>n.id===edge.to);if(!from||!to)return null;
-  const [fromSide,toSide]=connectionDirections(edge,from,to),vectors={top:[0,-1],right:[1,0],bottom:[0,1],left:[-1,0]};
-  // 拖动首尾线段时保留向外的短引线，不能把端点拉成折返的尾巴。
-  if(index===0){const v=vectors[fromSide];first[0]+=v[0]*32;first[1]+=v[1]*32;}
-  if(index===points.length-2){const v=vectors[toSide];last[0]+=v[0]*32;last[1]+=v[1]*32;}
-  first[axis]+=delta;last[axis]+=delta;
-  const waypoints=[...points.slice(1,index),first,last,...points.slice(index+2,-1)];
-  const line=routeConnections(nodes,[{...edge,waypoints}],{scope:'manual-segment-preview'})[0];
-  return line?.route.manual&&!line.route.repaired&&!line.route.blocked?waypoints:null;
+  const from=nodes.find(n=>n.id===edge.from),to=nodes.find(n=>n.id===edge.to);if(!from||!to)return null;
+  const [fromSide,toSide]=connectionDirections(edge,from,to);
+  const next=routingSplitSegment(points,index,delta,fromSide,toSide);
+  return next?next.slice(1,-1):null;
+}
+export function simplifyConnectionWaypoints(nodes,edge,points){
+  if(!edge||!Array.isArray(points)||points.length<3)return null;
+  const from=nodes.find(n=>n.id===edge.from),to=nodes.find(n=>n.id===edge.to);if(!from||!to)return null;
+  const [fromSide,toSide]=connectionDirections(edge,from,to);
+  const cleaned=simplifyOrthogonalPoints(points,fromSide,toSide);
+  return cleaned.slice(1,-1);
+}
+export function adjustConnectionCurvePoint(waypoints,index,point,insert=false){
+  if(!Array.isArray(point)||point.length!==2||!point.every(Number.isFinite))return null;
+  const list=Array.isArray(waypoints)?waypoints.filter(isCanvasPoint).map(p=>[p[0],p[1]]):[];
+  if(insert){const at=Math.max(0,Math.min(list.length,index));list.splice(at,0,[point[0],point[1]]);}
+  else{if(index<0||index>=list.length)return null;list[index]=[point[0],point[1]];}
+  return list;
 }
 export function thumbnailLayout(width,height,boxWidth=canvasCardSize.width-2,boxHeight=canvasCardSize.height-canvasCardSize.header-3){
   const scale=Math.min(boxWidth/width,boxHeight/height);return {scale,width:width*scale,height:height*scale,left:(boxWidth-width*scale)/2,top:(boxHeight-height*scale)/2};
 }
 export function wheelZoomFactor(delta,sensitivity=3.5,mode=0){const pixels=delta*(mode===1?16:mode===2?800:1);return Math.exp(Math.max(-.7,Math.min(.7,-pixels*.003*sensitivity)));}
 export function zoomCamera(camera,scale,anchor){const next=Math.max(.08,Math.min(2.5,scale)),ratio=next/camera.scale;return {scale:next,x:anchor[0]-(anchor[0]-camera.x)*ratio,y:anchor[1]-(anchor[1]-camera.y)*ratio};}
-// 文字按实际宽高放到线段旁，只避开节点；新建其他连线不挪动原有文字。
+// 飞书风格线上居中标签：默认按弧长中点压线遮断；手动拖拽只沿路径滑动（labelT），旧 labelPosition 自动投影吸回线上。
 export function placeConnectionLabels(lines,nodes,measure=text=>Array.from(text).reduce((width,char)=>width+(/[^\x00-\xff]/.test(char)?12:7),0)){
   const result=new Map(),occupied=nodes.map(n=>({x:n.x-6,y:n.y-6,width:canvasNodeWidth(n)+12,height:canvasNodeHeight(n)+12}));
   const overlaps=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
   const wrap=(text,width)=>String(text).split('\n').flatMap(paragraph=>{const rows=[];let row='';for(const char of paragraph){if(row&&measure(row+char)>width){rows.push(row);row='';}row+=char;}rows.push(row);return rows;});
   const labelled=lines.map(line=>({...line,text:isBranch(line.to)?line.to.title:line.edge.condition||(line.edge.label?.trim()==='继续'?'':line.edge.label||'')})).filter(line=>line.text&&!line.route.blocked);
+  const candidatesT=[.5,.38,.62,.26,.74,.16,.84,.44,.56];
   for(const line of labelled){
-    const segments=line.route.points.slice(1).map((end,i)=>{const start=line.route.points[i];return {start,end,horizontal:start[1]===end[1],length:Math.abs(end[0]-start[0])+Math.abs(end[1]-start[1])};}).filter(s=>s.length);
+    const samples=connectionPathSamples(line.route.points,8,nodes,line.route.lineType||'polyline');
+    if(!samples.length)continue;
+    if(typeof line.edge.labelT==='number'&&Number.isFinite(line.edge.labelT)){
+      const t=Math.max(0,Math.min(1,line.edge.labelT)),rows=wrap(line.text,220),width=Math.max(...rows.map(measure))+16,height=rows.length*18+8;
+      const hit=connectionPathPointAt(samples,t),anchor=hit?hit.point:samples[0],box={x:anchor[0]-width/2,y:anchor[1]-height/2,width,height};
+      result.set(line.edge.id,{box,rows,anchor,t,leader:null,manual:true});continue;
+    }
     if(isCanvasPoint(line.edge.labelPosition)){
-      const rows=wrap(line.text,220),box={x:line.edge.labelPosition[0],y:line.edge.labelPosition[1],width:Math.max(...rows.map(measure))+12,height:rows.length*18+8},center=[box.x+box.width/2,box.y+box.height/2];let anchor=line.route.label,distance=Infinity;
-      for(const segment of segments){const point=segment.horizontal?[Math.max(Math.min(segment.start[0],segment.end[0]),Math.min(Math.max(segment.start[0],segment.end[0]),center[0])),segment.start[1]]:[segment.start[0],Math.max(Math.min(segment.start[1],segment.end[1]),Math.min(Math.max(segment.start[1],segment.end[1]),center[1]))],d=Math.abs(point[0]-center[0])+Math.abs(point[1]-center[1]);if(d<distance){distance=d;anchor=point;}}
-      const point=[Math.max(box.x,Math.min(box.x+box.width,anchor[0])),Math.max(box.y,Math.min(box.y+box.height,anchor[1]))],leader=distance>Math.max(box.width,box.height)/2+24?`M${anchor.join(',')} L${point[0]},${anchor[1]} L${point.join(',')}`:null;
-      result.set(line.edge.id,{box,rows,anchor,leader,manual:true});continue;
+      const rows=wrap(line.text,220),width=Math.max(...rows.map(measure))+16,height=rows.length*18+8;
+      const legacyCenter=[line.edge.labelPosition[0]+width/2,line.edge.labelPosition[1]+height/2];
+      const proj=connectionPathProject(samples,legacyCenter);
+      const t=proj?Math.max(.06,Math.min(.94,proj.t)):.5,hit=connectionPathPointAt(samples,t),anchor=hit?hit.point:samples[0];
+      const box={x:anchor[0]-width/2,y:anchor[1]-height/2,width,height};
+      result.set(line.edge.id,{box,rows,anchor,t,leader:null,manual:true});continue;
     }
     let best=null;
     for(const maxWidth of [220,140,88]){
-      const rows=wrap(line.text,maxWidth),width=Math.max(...rows.map(measure))+12,height=rows.length*18+8;
-      for(const segment of segments)for(const fraction of [.5,.25,.75])for(const shift of [0,-24,24,-48,48,-96,96])for(const side of [-1,1]){
-        const anchor=segment.start.map((v,axis)=>v+(segment.end[axis]-v)*fraction),box=segment.horizontal?{x:anchor[0]-width/2+shift,y:anchor[1]+(side<0?-height-8:8),width,height}:{x:anchor[0]+(side<0?-width-8:8),y:anchor[1]-height/2+shift,width,height};
+      const rows=wrap(line.text,maxWidth),width=Math.max(...rows.map(measure))+16,height=rows.length*18+8;
+      for(const t of candidatesT){
+        const hit=connectionPathPointAt(samples,t);if(!hit)continue;
+        const anchor=hit.point,box={x:anchor[0]-width/2,y:anchor[1]-height/2,width,height};
         if(occupied.some(other=>overlaps(box,other)))continue;
-        const score=Math.abs(shift)+rows.length*14+(segment.horizontal?0:16)+Math.abs(fraction-.5)*32;
-        if(!best||score<best.score)best={box,rows,anchor,shift,score};
+        const score=Math.abs(t-.5)*80+rows.length*14+(maxWidth===220?0:maxWidth===140?12:28);
+        if(!best||score<best.score)best={box,rows,anchor,t,score};
       }
     }
-    // 极密画布仍保留完整正文，在空闲处标注，并用短折线指回原连接。
-    if(!best){const rows=wrap(line.text,140),width=Math.max(...rows.map(measure))+12,height=rows.length*18+8,anchor=[line.route.label[0]-8,line.route.label[1]+8],base={x:anchor[0]-width/2,y:anchor[1]-height-8,width,height};
-      for(let distance=24;distance<=384&&!best;distance+=24)for(const [dx,dy] of [[0,-distance],[0,distance],[-distance,0],[distance,0]]){const box={...base,x:base.x+dx,y:base.y+dy};if(!occupied.some(other=>overlaps(box,other))){best={box,rows,anchor,shift:distance};break;}}
-      best??={box:{...base,x:Math.max(0,...occupied.map(r=>r.x+r.width))+24},rows,anchor,shift:Infinity};
+    if(!best){
+      const rows=wrap(line.text,140),width=Math.max(...rows.map(measure))+16,height=rows.length*18+8;
+      const hit=connectionPathPointAt(samples,.5),anchor=hit?hit.point:samples[0],box={x:anchor[0]-width/2,y:anchor[1]-height/2,width,height};
+      best={box,rows,anchor,t:.5};
     }
-    const {box,rows,anchor,shift}=best;
-    const point=[Math.max(box.x,Math.min(box.x+box.width,anchor[0])),Math.max(box.y,Math.min(box.y+box.height,anchor[1]))];
-    const leader=Math.abs(shift)>24?`M${anchor.join(',')} L${point[0]},${anchor[1]} L${point.join(',')}`:null;
-    result.set(line.edge.id,{box,rows,anchor,leader});
+    result.set(line.edge.id,{box:best.box,rows:best.rows,anchor:best.anchor,t:best.t,leader:null});
   }
   return result;
 }
@@ -472,10 +692,15 @@ export function validate(model) {
     if(e.summary!==undefined&&typeof e.summary!=='string')errors.push(`操作核心说明不正确：${e.label}`);
     if((e.when!==undefined&&!isFlowContext(e.when))||(e.setContext!==undefined&&!isFlowContext(e.setContext)))errors.push(`操作条件不正确：${e.label}`);
     if(['fromSide','toSide'].some(key=>e[key]!==undefined&&!connectionSides.includes(e[key])))errors.push(`连线端点不正确：${e.label}`);
+    if(['fromAnchor','toAnchor'].some(key=>e[key]!==undefined&&!isCanvasAnchor(e[key])))errors.push(`连线锚点位置不正确：${e.label}`);
+    if(e.lineType!==undefined&&!connectionLineTypes.includes(e.lineType))errors.push(`连线样式不正确：${e.label}`);
+    if(e.lineStyle!==undefined&&!connectionLineStyles.includes(e.lineStyle))errors.push(`连线线型不正确：${e.label}`);
+    if(e.arrow!==undefined&&!connectionArrowModes.includes(e.arrow))errors.push(`连线箭头不正确：${e.label}`);
     if(e.overview!==undefined&&typeof e.overview!=='boolean')errors.push(`连线概览设置不正确：${e.label}`);
     if(e.diagram!==undefined&&typeof e.diagram!=='boolean')errors.push(`画布连线设置不正确：${e.label}`);
     if(e.waypoints!==undefined&&(!Array.isArray(e.waypoints)||e.waypoints.some(point=>!isCanvasPoint(point))))errors.push(`手动折点不正确：${e.label}`);
     if(e.labelPosition!==undefined&&!isCanvasPoint(e.labelPosition))errors.push(`连线文字位置不正确：${e.label}`);
+    if(e.labelT!==undefined&&(typeof e.labelT!=='number'||!Number.isFinite(e.labelT)||e.labelT<0||e.labelT>1))errors.push(`连线文字沿线位置不正确：${e.label}`);
     if(e.canvasFrom&&!isBranch(model.nodes.find(n=>n.id===e.canvasFrom)))errors.push(`连线分叉点不存在：${e.label}`);
     if (e.rect && (!Array.isArray(e.rect) || e.rect.length !== 4 || !e.rect.every(Number.isFinite) || e.rect[0] < 0 || e.rect[1] < 0 || e.rect[2] <= 0 || e.rect[3] <= 0 || e.rect[0]+e.rect[2] > 1.001 || e.rect[1]+e.rect[3] > 1.001)) errors.push(`交互区域不正确：${e.label}`);
   }

@@ -307,7 +307,7 @@ test('新增或移除其他连线不挪动原有说明，用户可手动调整�
   const first=placeConnectionLabels(routeConnections(nodes,[edge]),nodes).get('first');
   const extra={id:'extra',from:'from',to:'to',fromSide:'bottom',toSide:'bottom',condition:'新增的很长的条件说明'};
   assert.deepEqual(placeConnectionLabels(routeConnections(nodes,[extra,edge]),nodes).get('first'),first);
-  edge.labelPosition=[500,500];const moved=placeConnectionLabels(routeConnections(nodes,[edge,extra]),nodes).get('first');assert.equal(moved.box.x,500);assert.equal(moved.box.y,500);assert.equal(moved.manual,true);delete edge.labelPosition;assert.deepEqual(edge,before);
+  edge.labelT=.25;const moved=placeConnectionLabels(routeConnections(nodes,[edge,extra]),nodes).get('first');assert.equal(moved.t,.25);assert.equal(moved.leader,null);assert.equal(moved.manual,true);assert.notDeepEqual(moved.anchor,first.anchor);delete edge.labelT;assert.deepEqual(edge,before);
 });
 test('非法节点、热点和规则引用不会进入保存',()=>{const m=fixture();assert.deepEqual(validate(m),[]);m.edges[0].to='missing';m.annotations[0].point=[3,.5];m.nodes[0].path='../secret';assert.equal(validate(m).length,3);});
 test('模块导出包含跨模块目标，移除无关内容，保留批注',()=>{const m=exportSubset(fixture(),'a');assert.deepEqual(m.nodes.map(n=>n.id),['one','two']);assert.equal(m.annotations.length,1);assert.equal(m.entryModule,'a');assert.equal(validate(m).length,0);});

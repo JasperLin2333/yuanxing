@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {clone,looseConnectionSide,connectionPoint,connectionDirections,connectionTarget,connectionDisplayPath,previewConnection,routeConnections,overviewEdges,createLineBranch,lineBranchSplit,connectNodes,reconnectEdge,isBranch,moveCanvasNodes,snapNodePosition,validate,canvasNodeWidth,canvasNodeHeight,placeConnectionLabels} from '../runtime/core.mjs';
+import {clone,looseConnectionSide,connectionPoint,connectionDirections,connectionTarget,connectionDisplayPath,connectionPathSamples,connectionPathProject,connectionCrossArcs,previewConnection,routeConnections,overviewEdges,createLineBranch,lineBranchSplit,connectNodes,reconnectEdge,isBranch,moveCanvasNodes,snapNodePosition,validate,canvasNodeWidth,canvasNodeHeight,placeConnectionLabels,History} from '../runtime/core.mjs';
 
 const source=await readFile(new URL('../runtime/app.mjs',import.meta.url),'utf8');
 const page=(id,x,y)=>({id,module:'flow',kind:'note',title:id,x,y,width:1280,height:800,description:''});
@@ -124,14 +124,16 @@ test('游离端朝向只在主方向明显改变时切换，不在对角线附�
   assert(flips.size<=1,'对角线附近至多切换一次');
   assert.equal(looseConnectionSide(fixed,[200,-300],'left'),'bottom');
 });
-test('页面挡住路径时仍给出示意线且不提交；被挡连线不会消失',()=>{
+test('页面交叉或重叠时仍能生成完整顺滑连线不阻塞，且支持卡片边框轮廓任意贴靠',()=>{
   const nodes=[page('a',0,0),page('b',1000,0),page('cover',350,0)];
   const line=routeConnections(nodes,[{id:'ab',from:'a',to:'b',fromSide:'right',toSide:'left'}],{scope:'overlay'})[0];
-  assert.equal(line.route.blocked,true);assert.deepEqual(line.route.points,[]);
-  assert(line.route.overlay.length>=2);assert.deepEqual(line.route.overlay[0],line.start);assert.deepEqual(line.route.overlay.at(-1),line.end);
-  const preview=previewConnection(nodes,nodes[0],'right',nodes[1],'left');assert.equal(preview.route.blocked,true);assert(preview.route.overlay.length>=2);
+  assert.equal(line.route.blocked,undefined);assert.ok(line.route.points.length>=2);
+  assert.deepEqual(line.route.points[0],line.start);assert.deepEqual(line.route.points.at(-1),line.end);
+  const preview=previewConnection(nodes,nodes[0],'right',nodes[1],'left');assert.equal(preview.route.blocked,undefined);assert.ok(preview.route.points.length>=2);
+  const contour=connectionTarget(nodes,[988,220],{exclude:['a']});
+  assert.equal(contour.node.id,'b');assert.equal(contour.side,'left');assert.equal(contour.snapped,'contour');assert.equal(contour.point[0],1000);assert.equal(contour.point[1],220);
 });
-test('拖线松手：空白处与被挡方向取消并提示，轻点端口不提示，改接来源清绑定时提示',()=>{
+test('拖线松手：空白处取消并提示，轻点端口不提示，改接来源清绑定时提示',()=>{
   let c=controllerFixture(),s=c.state,before=clone(s.model);
   s.dragConnection(c.event('pointerdown',400,145),s.model.nodes[0],'right');c.listeners.get('pointermove')(c.event('pointermove',700,600));c.listeners.get('pointerup')(c.event('pointerup',700,600));
   assert.equal(s.writes,0);assert.deepEqual(s.model,before);assert.equal(s.notices.length,1);assert.match(s.notices[0],/连接点/);
@@ -140,10 +142,10 @@ test('拖线松手：空白处与被挡方向取消并提示，轻点端口不�
   s.dragConnection(c.event('pointerdown',0,145),s.model.nodes[1],'left',edge,'from');c.listeners.get('pointermove')(c.event('pointermove',1200,845));c.listeners.get('pointerup')(c.event('pointerup',1200,845));
   assert.equal(s.writes,1);assert.equal(s.model.edges[0].from,'c');assert.equal(s.model.edges[0].selector,undefined);assert.equal(s.notices.length,1);assert.match(s.notices[0],/绑定已清除/);
 });
-test('选中连线只常显两端把手（线段把手悬停才出现），端口悬浮即现，拖线时候选页面都显示连接点',async()=>{
+test('选中连线常显端点与胶囊线段把手（含曲线拐点及吸附点样式），拖线时候选页面都显示连接点',async()=>{
   const css=await readFile(new URL('../runtime/style.css',import.meta.url),'utf8');
   assert.match(css,/\.node:hover \.node-port/);assert.match(css,/\.connecting \.node:not\(\.branch\) \.node-port\{opacity:\.35;visibility:visible\}/);
-  assert(!/\.edge-endpoint\{[^}]*opacity:0/.test(css));assert.match(css,/\.edge-bend\{[^}]*opacity:0/);assert.match(css,/\.edge-segment-control:hover \.edge-bend\{opacity:1/);assert.match(css,/path\.flow\.blocked/);
+  assert(!/\.edge-endpoint\{[^}]*opacity:0/.test(css));assert.match(css,/\.edge-bend\{[^}]*opacity:1/);assert.match(css,/\.edge-curve-handle/);assert.match(css,/\.edge-curve-mid/);assert.match(css,/\.connection-snap-dot/);
 });
 test('移动主干来源页面时，分叉点和主干折点一起平移，分支目标不被带动',()=>{
   const m=fixture(),original=splitLine(m),result=createLineBranch(m,'ab','c',original.split.point,'left',original.route),branch=m.nodes.find(n=>n.id===result.groupId);
@@ -154,9 +156,120 @@ test('移动主干来源页面时，分叉点和主干折点一起平移，分�
   assert.deepEqual(trunk.waypoints||[],before.way.map(([x,y])=>[x,y+100]));assert.deepEqual(validate(m),[]);
   const other=moveCanvasNodes(m,'flow',[{id:'b',x:1000,y:60}]);assert.deepEqual(other,['b']);
 });
-test('选中连线的「＋」默认收起，靠近线时才显示并贴着最近的一点',async()=>{
+test('画布连线不再显示「＋」分叉控件，改由卡片直接拖出多条分支',async()=>{
   const css=await readFile(new URL('../runtime/style.css',import.meta.url),'utf8');
-  assert.match(css,/\.edge-fork-control\{[^}]*opacity:0/);assert.match(css,/\.edge-fork-control\.active/);
-  assert(source.includes('lineBranchSplit(route.points,canvasPoint(event))'));
-  const near=lineBranchSplit([[0,0],[100,0],[100,200]],[100,150]);assert.deepEqual(near.point,[100,150]);assert.equal(near.side,'bottom');
+  assert.equal(css.includes('.edge-fork-control'),false);
+  assert.equal(source.includes('edge-fork-control'),false);
+  const created=[];
+  const element=()=>{const classes=new Set();return {dataset:{},style:{},attrs:{},childNodes:[],classList:{add:(...a)=>a.forEach(c=>{classes.add(c);created.push(c);}),remove:(...a)=>a.forEach(c=>classes.delete(c)),toggle:(c,f)=>f?classes.add(c):classes.delete(c),contains:c=>classes.has(c)},setAttribute(k,v){this.attrs[k]=v;},append(...children){for(const child of children){this.childNodes.push(child);child.parent=this;}},replaceChildren(){this.childNodes=[];},remove(){this.parent.childNodes=this.parent.childNodes.filter(n=>n!==this);}};};
+  const svg=element();Object.defineProperty(svg,'innerHTML',{set(){svg.childNodes=[element()];}});
+  const m=fixture();const s={model:m,current:null,camera:{scale:1},cancelConnection:null,recycleOpen:false,linesHidden:false,moduleId:'flow',selected:{type:'edge',id:'ab'},readonly:false,lastLinesSignature:null,lineTextContext:null,renderSections(){},activeCanvasNodes:()=>m.nodes,overviewEdges,canvasNodeWidth,canvasNodeHeight,routeConnections,placeConnectionLabels,connectionDisplayPath,isBranch,handleUnit:()=>1,positionArrow(){},positionEndpoint(){},positionBend(){},
+    connectionKey:e=>[e.from,e.to,e.condition||e.label,e.fromSide,e.toSide].join('\0'),$:()=>svg,getComputedStyle:()=>({fontFamily:'sans-serif'}),document:{createElement:()=>({getContext:()=>({measureText:()=>({width:12})})}),createElementNS:element}};
+  vm.runInContext(source.slice(source.indexOf('function paintLines(){'),source.indexOf('function edgeGeometryGesture(')),vm.createContext(s));s.paintLines();
+  assert.equal(created.includes('edge-fork-control'),false);
+});
+
+test('拖动连线文字只沿连线轨迹滑动，不脱离到空白画布',()=>{
+  const model=fixture();model.edges[0].labelPosition=[520,400];
+  const listeners=new Map();
+  const state={model,readonly:false,spacePressed:false,selected:null,dirty:false,camera:{scale:1},activeCanvasGesture:null,history:new History(),clone,overviewEdges,activeCanvasNodes:()=>state.model.nodes,routeConnections,connectionPathSamples,connectionPathProject,connectionKey:e=>[e.from,e.to,e.condition||e.label,e.fromSide,e.toSide].join('\0'),canvasPoint:e=>[e.clientX,e.clientY],drawLines(){},drawAlignmentGuides(){},renderInspector(){},updateHistoryButtons(){},scheduleSave(){},document:{addEventListener(name,fn){listeners.set(name,fn);},removeEventListener(name,fn){if(listeners.get(name)===fn)listeners.delete(name);}}};
+  vm.runInContext(source.slice(source.indexOf('function edgeGeometryGesture('),source.indexOf('function dragEdgeSegment(')),vm.createContext(state));
+  state.dragEdgeLabel({button:0,clientX:700,clientY:145,preventDefault(){},stopPropagation(){}},'ab');
+  listeners.get('pointermove')({clientX:550,clientY:500});
+  listeners.get('pointerup')({type:'pointerup',clientX:550,clientY:500});
+  assert.equal(state.model.edges[0].labelPosition,undefined);
+  assert.ok(Math.abs(state.model.edges[0].labelT-.25)<1e-3);
+  state.dragEdgeLabel({button:0,clientX:550,clientY:145,preventDefault(){},stopPropagation(){}},'ab');
+  listeners.get('pointermove')({clientX:704,clientY:220});
+  listeners.get('pointerup')({type:'pointerup',clientX:704,clientY:220});
+  assert.equal(state.model.edges[0].labelT,.5);
+});
+
+test('对齐飞书样式：外置悬停连接点、连线虚线/双向/无箭头、跨线跳弧、无内缩端点且无悬浮工具栏',async()=>{
+  const css=await readFile(new URL('../runtime/style.css',import.meta.url),'utf8');
+  assert.match(css,/\.node:not\(\.branch\) \.node-port\[data-side="top"\]\{left:50%;top:calc\(-14px \* var\(--port-scale,1\)\)\}/);
+  assert.match(css,/\.connecting \.node:not\(\.branch\) \.node-port\[data-side="top"\]\{left:50%;top:0\}/);
+  assert.match(css,/#lines path\.flow\.dashed,#lines \.connection-preview\.dashed\{stroke-dasharray:6 4\}/);
+  assert.equal(css.includes('edge-floating-bar'),false);
+  assert.equal(source.includes('edge-toolbar'),false);
+  assert.equal(source.includes('updateEdgeFloatingBar'),false);
+  const element=()=>{const classes=new Set();return {dataset:{},style:{},attrs:{},childNodes:[],classList:{add:(...a)=>a.forEach(c=>classes.add(c)),remove:(...a)=>a.forEach(c=>classes.delete(c)),toggle:(c,f)=>f?classes.add(c):classes.delete(c),contains:c=>classes.has(c)},setAttribute(k,v){this.attrs[k]=v;},append(...children){for(const child of children){this.childNodes.push(child);child.parent=this;}},replaceChildren(){this.childNodes=[];},remove(){this.parent.childNodes=this.parent.childNodes.filter(n=>n!==this);}};};
+  const svg=element();Object.defineProperty(svg,'innerHTML',{set(){svg.childNodes=[element()];}});
+  const m=fixture();m.edges[0].lineStyle='dashed';m.edges[0].arrow='both';m.nodes.push(page('d',500,-350),page('e',500,350));m.edges.push({id:'de',from:'d',to:'e',fromSide:'bottom',toSide:'top',arrow:'none'});
+  const s={model:m,current:null,camera:{scale:1},cancelConnection:null,recycleOpen:false,linesHidden:false,moduleId:'flow',selected:null,readonly:true,lastLinesSignature:null,lineTextContext:null,renderSections(){},activeCanvasNodes:()=>m.nodes,overviewEdges,canvasNodeWidth,canvasNodeHeight,routeConnections,placeConnectionLabels,connectionDisplayPath,connectionCrossArcs,isBranch,
+    connectionKey:e=>[e.from,e.to,e.condition||e.label,e.fromSide,e.toSide,e.lineStyle||'solid',e.arrow||'end'].join('\0'),$:()=>svg,getComputedStyle:()=>({fontFamily:'sans-serif'}),document:{createElement:()=>({getContext:()=>({measureText:()=>({width:12})})}),createElementNS:element}};
+  vm.runInContext(source.slice(source.indexOf('function paintLines(){'),source.indexOf('function edgeGeometryGesture(')),vm.createContext(s));s.paintLines();
+  const ab=svg.yuanxingLayers.views.get('ab').path,de=svg.yuanxingLayers.views.get('de').path;
+  assert.equal(ab.classList.contains('dashed'),true);
+  assert.equal(ab.attrs['marker-start'],'url(#arrow-start)');assert.equal(ab.attrs['marker-end'],'url(#arrow)');
+  assert.equal(de.attrs['marker-start'],'none');assert.equal(de.attrs['marker-end'],'none');
+  assert.match(de.attrs.d,/A6,6 0 0,[01]/);
+  const epCtx={camera:{scale:1}};
+  vm.runInContext(source.slice(source.indexOf('function handleUnit('),source.indexOf('function canvasPoint(')),vm.createContext(epCtx));
+  const hit=element(),dot=element(),h={dataset:{side:'right',x:'400',y:'145',branch:'false'},querySelector:sel=>sel==='.edge-endpoint-hit'?hit:dot};
+  epCtx.positionEndpoint(h);assert.equal(dot.attrs.cx,400);assert.equal(dot.attrs.cy,145);
+});
+
+test('精简右侧连线说明，移除绑定点击区域/左下角删线/整理连线，并让直接编辑与画布字号位置一致',async()=>{
+  const index=await readFile(new URL('../runtime/index.html',import.meta.url),'utf8');
+  const core=await readFile(new URL('../runtime/core.mjs',import.meta.url),'utf8');
+  const zoomTools=index.match(/<div class="zoom-tools">[\s\S]*?<\/details><\/div>/)[0];
+  assert.equal(zoomTools.includes('data-action="delete-edge"'),false);
+  assert.equal(zoomTools.includes('data-action="tidy-lines"'),false);
+  assert.equal(source.includes('tidy-lines'),false);
+  assert.equal(core.includes('tidyConnections'),false);
+  assert.equal(source.includes('绑定点击区域'),false);
+  const el=tag=>({tag,textContent:'',innerHTML:'',children:[],value:'',oninput:null,onblur:null,onpaste:null,className:'',type:'',onclick:null,style:{},attrs:{},
+    setAttribute(k,v){this.attrs[k]=v;},append(...items){for(const item of items)if(item&&typeof item==='object')this.children.push(item);},
+    replaceChildren(){this.children=[];},insertAdjacentHTML(_,html){this.html=(this.html||'')+html;},focus(){},select(){},remove(){}});
+  const m={version:1,title:'t',modules:[{id:'flow',title:'flow'}],nodes:[{...page('list',0,0),title:'已有客户列表'},{...page('perm',800,0),title:'普通成员提示'},{...page('ok',800,500),title:'分配完成'},{id:'br',module:'flow',kind:'note',presentation:'branch',title:'',width:16,height:16,x:400,y:250,description:''}],edges:[{id:'e1',from:'list',to:'br',diagram:true,label:''},{id:'e2',from:'br',to:'perm',diagram:true,label:'分支1'},{id:'e3',from:'br',to:'ok',diagram:true,label:'分支2'}],annotations:[]};
+  for(const [edgeId,expectedSummary] of [['e2','已有客户列表 <span aria-hidden="true">→</span> 普通成员提示'],['e1','已有客户列表 <span aria-hidden="true">→</span> 普通成员提示 / 分配完成']]){
+    const pane=el('aside');
+    const state={model:clone(m),readonly:false,selected:{type:'edge',id:edgeId},moduleId:'flow',esc:v=>v||'',isBranch,node:id=>state.model.nodes.find(n=>n.id===id),
+      canvasText:()=>'',selectionTools(){},deleteIconButton:(title)=>({tag:'btn',title}),deleteSelectedConnection(){},pointExplanations(){},
+      editInspectedValue(){},drawLines(){},sidebar(){},pasteTextAreaImages(){},document:{createElement:el,querySelector:()=>null},$:sel=>sel==='#inspector'?pane:el('div')};
+    vm.runInContext(source.slice(source.indexOf('function field('),source.indexOf('function explanationText('))+source.slice(source.indexOf('function renderInspector(){'),source.indexOf('function deleteAnnotation(')),vm.createContext(state));
+    state.renderInspector();
+    assert.ok(pane.html.includes(expectedSummary),expectedSummary);
+    const labels=pane.children.filter(c=>c.tag==='label').map(c=>c.textContent);
+    assert.deepEqual(labels,['操作名称','说明正文']);
+    const buttons=pane.children.filter(c=>c.tag==='button').map(c=>c.textContent);
+    assert.deepEqual(buttons,[]);
+    assert.equal(pane.children[0].children.some(c=>c.tag==='btn'&&c.title==='删除连线及其标记'),true);
+  }
+  const editorDoc={created:[],querySelector:()=>null,body:{append(){}},createElement(t){const item={tag:t,style:{},attrs:{},focus(){},select(){},setSelectionRange(){},remove(){},setAttribute(k,v){this.attrs[k]=v;}};this.created.push(item);return item;}};
+  const lModel=clone(fixture());lModel.edges[0].label='原文字';
+  let writes=0;
+  const eState={model:lModel,readonly:false,node:id=>lModel.nodes.find(n=>n.id===id),isBranch,innerWidth:1000,innerHeight:800,$:()=>({focus(){}}),edit(fn){writes++;fn(lModel);},document:editorDoc};
+  vm.runInContext(source.slice(source.indexOf('function editConnectionLabel('),source.indexOf('function drawAlignmentGuides(')),vm.createContext(eState));
+  eState.editConnectionLabel('ab',{preventDefault(){},stopPropagation(){}},{anchorAtPath:false,initialInput:'分'});
+  const input=editorDoc.created[0];
+  assert.equal(input.placeholder,'输入连线说明...');
+  assert.equal(input.value,'分');
+  assert.equal(eState.connectionLabelEditor.initial,'原文字');
+  input.value='分支一';
+  input.onkeydown({key:'Enter',stopPropagation(){},preventDefault(){}});
+  assert.equal(writes,1);
+  assert.equal(lModel.edges[0].label,'分支一');
+
+  const classes=new Set(),pillRect={getBoundingClientRect:()=>({left:200,top:100,width:60,height:20.8})};
+  const group={classList:{add:c=>classes.add(c),remove:c=>classes.delete(c)},querySelector:sel=>sel==='rect'?pillRect:null};
+  const scaledDoc={created:[],querySelector:sel=>sel.includes('.edge-label')?group:null,body:{append(){}},createElement(t){const item={tag:t,style:{},attrs:{},focus(){},select(){},setSelectionRange(){},remove(){},setAttribute(k,v){this.attrs[k]=v;}};this.created.push(item);return item;}};
+  const scaledModel=clone(fixture());scaledModel.edges[0].label='原文字';
+  const scaledState={model:scaledModel,readonly:false,camera:{x:0,y:0,scale:.8},node:id=>scaledModel.nodes.find(n=>n.id===id),isBranch,innerWidth:1000,innerHeight:800,$:()=>({focus(){}}),edit(){},document:scaledDoc};
+  vm.runInContext(source.slice(source.indexOf('function editConnectionLabel('),source.indexOf('function drawAlignmentGuides(')),vm.createContext(scaledState));
+  scaledState.editConnectionLabel('ab',{preventDefault(){},stopPropagation(){}},{anchorAtPath:false});
+  const ed=scaledDoc.created[0];
+  assert.equal(ed.style.fontSize,'9.6px');
+  assert.equal(ed.style.height,'20.8px');
+  assert.equal(ed.style.borderRadius,'4.8px');
+  assert.equal(classes.has('editing'),true);
+  const firstLeft=parseFloat(ed.style.left),firstWidth=parseFloat(ed.style.width);
+  assert.ok(Math.abs(firstLeft+firstWidth/2-230)<=1);
+  ed.value='一段较长的分支说明文字测试';ed.oninput();
+  const nextLeft=parseFloat(ed.style.left),nextWidth=parseFloat(ed.style.width);
+  assert.ok(nextWidth>firstWidth);
+  assert.ok(Math.abs(nextLeft+nextWidth/2-230)<=1);
+  ed.onkeydown({key:'Escape',stopPropagation(){},preventDefault(){}});
+  assert.equal(classes.has('editing'),false);
 });

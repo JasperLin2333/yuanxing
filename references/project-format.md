@@ -50,7 +50,7 @@
 - 模块只用于画布组织。没有 `experiences` 时，完整原型从 `entryModule` 的首个有效页面进入，合并全部模块；既有 `modules[].entry` 仅作为兼容的入口线索，不提供手动设置按钮。
 - 只有不同产品或平台才定义 `experiences: [{"id":"pc","title":"PC端","entry":"home"},{"id":"mobile","title":"移动端","entry":"mobile-home"}]`。入口由 Agent 依据已有设计选择，仍可跨模块跳转；选择器只在两个及以上入口时显示。
 - 旧项目的 `flows` 作为显式场景入口保留兼容；新增项目使用产品或平台级 `experiences`，不要按模块自动生成场景。每个入口必须对应实际可体验页面，`context` 只影响演示条件。
-- 后续编辑保留稳定标识、手调位置、`waypoints`、`labelPosition` 和普通批注；不要为了新增一个页面而重新排列整张画布。
+- 后续编辑保留稳定标识、手调位置、`fromAnchor / toAnchor`（边框相对坐标 `[nx, ny]`）、`waypoints`、`labelT`（及兼容的旧 `labelPosition`）和普通批注；连线另可选支持 `lineType`（`polyline | straight | curve`）、`lineStyle`（`solid | dashed`）与 `arrow`（`end | both | none`）。不要为了新增一个页面而重新排列整张画布。
 
 ## 跳转与分支
 
@@ -58,8 +58,8 @@
 - `diagram: true` 只表达画布关系，不执行跳转。`navigation: true` 或 `overview: false` 隐藏普通导航的概览连线，保留页面内跳转。
 - 同一按钮可对应多条边：`when: {"role":"admin"}` 指定分支条件；`setContext: {"hasSelected":true}` 记录演示选择。条件匹配只有一条时直接进入，多条时供查看者选择。没有匹配时停留当前页。
 - 页面内的真实脚本可保留局部交互。绑定为跨页跳转的控件由播放器接管；不要同时在其脚本中实现另一次跨页跳转。
-- `kind: "note", presentation: "branch"` 是画布分叉点，仅表达结构；实际按钮跳转仍绑定到原页面。
-- `canvasFrom` 只改变连线在画布上的出发点。删除支线后应收拢已无分支作用的连接点；删除连接点应接回前后关系，保留原始 `from/to`、控件绑定、条件及业务说明，不能按普通页面删除连带清空主链。
+- `kind: "note", presentation: "branch"` 是画布分叉点（兼容历史编排，工作台画布不再提供线上「＋」按钮新建分叉点），仅表达结构；实际按钮跳转仍绑定到原页面。
+- `canvasFrom` 只改变连线在画布上的出发点，工作台右侧「连线说明」会自动跳过分叉点展示实际上下游页面。删除支线后应收拢已无分支作用的连接点；删除连接点应接回前后关系，保留原始 `from/to`、控件绑定、条件及业务说明，不能按普通页面删除连带清空主链。
 
 ## 可选声明式局部交互
 
@@ -187,7 +187,7 @@ node "<Skill目录>/scripts/yuanxing.mjs" export --root ./my-project --extension
 | `nodeNativeInteraction: true` | 与 `nativeInteraction: true` 同时启用时，打开的 HTML 节点使用真实控件，不再使用交互用外层热点与替身输入框；评审批注及打点、绑定区域仍可用。旧扩展未启用时沿用原代理机制 |
 | `nativeInput(event, type)` / `nativeKeyDown(event)` | 原生输入、change 与键盘事件；页面内跳转由内核直接绑定实际元素 |
 | `styles` | 扩展的控件样式 |
-| `bindHotspots: false` | 项目自行维护控件绑定时，收起通用点击区域编辑入口 |
+| `bindHotspots: false` | 兼容保留的旧扩展开关；通用工作台右侧已统一精简为“操作名称”和“说明正文” |
 | `layout(doc, node)` / `mount(doc, node, options)` | 排版缩略图、挂载打开后的页面；`options.interactive` 表示是否使用原生交互，`options.surface` 为 `node`、`prototype` 或 `document`，`options.context` 是进入时的上下文副本。缩略图不调用 `mount`，旧扩展可忽略第三个参数 |
 | `outgoing(edges, doc, id)` | 合并项目声明的页面操作 |
 | `travel(edge)` | 处理扩展操作；返回 `true` 表示已处理 |
