@@ -46,6 +46,26 @@ test('不打开浏览器可启动服务；显式打开可重新开页；服务�
   await openWorkbench(target,options);assert.equal(opened.length,2);assert.equal(starts,1);
   status=null;const restarted=await openWorkbench(target,{...options,browser:'once'});assert.equal(restarted.reused,false);assert.equal(restarted.browserOpened,true);assert.equal(starts,2);assert.equal(opened.length,3);
 });
+test('隔离项目可实际启动并复用，未配置时给出设置提示',async t=>{
+  const dir=await fixture(t),root=path.join(dir,'project'),home=path.join(dir,'launcher');await run(['init',root]);
+  const socket=http.createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
+  const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
+  const target=await configureLauncher({root,port},{home}),opened=[];
+  await assert.rejects(configureLauncher({},{home:path.join(dir,'unconfigured')}),/尚未设置工作台/);
+  let started;
+  try{
+    started=await openWorkbench(target,{home,openURL:async url=>opened.push(url)});
+    assert.equal(started.reused,false);assert.equal(started.browserOpened,true);assert.ok(started.pid);
+    assert.equal((await probeWorkbench(port)).identity,launchIdentity(target));
+    const reused=await openWorkbench(target,{home,openURL:async url=>opened.push(url)});
+    assert.equal(reused.reused,true);assert.equal(reused.browserOpened,true);
+    assert.deepEqual(opened,[`http://127.0.0.1:${port}/`,`http://127.0.0.1:${port}/`]);
+  }finally{
+    if(started?.pid){try{process.kill(started.pid,'SIGTERM');}catch(error){if(error.code!=='ESRCH')throw error;}}
+    for(let i=0;i<100&&await probeWorkbench(port);i++)await new Promise(resolve=>setTimeout(resolve,50));
+    assert.equal(await probeWorkbench(port),null);
+  }
+});
 test('探测只接受元形的启动身份，普通本机网页不能冒充可复用工作台',async t=>{
   let value={app:'yuanxing',identity:'local-project'};
   const server=http.createServer((req,res)=>{assert.equal(req.url,'/api/launcher');res.end(JSON.stringify(value));});
@@ -64,12 +84,15 @@ test('工作区记住已打开项目，入口校验已移除项目且项目指�
   const result=await openWorkbench({workspace:file,port:4318},{...options,project:'b'});assert.equal(result.url,'http://127.0.0.1:4318/p/b/');assert.equal(result.browserOpened,false);
   await assert.rejects(openWorkbench({workspace:file,port:4318},{...options,project:'gone'}),/项目不存在/);
 });
-test('三个离线视图都有同一个启动入口；链接不携带项目数据，文件仍保持只读',async t=>{
+test('三个离线视图可在新窗口请求本机启动，并提供无法打开时的帮助',async t=>{
   const dir=await fixture(t),root=path.join(dir,'project');await run(['init',root,'--template','iteration']);const bundle=await (await createStore(root)).load();
   for(const view of ['review','document','prototype']){
     const html=await standalone(bundle,{view});
-    assert.match(html,/<a id="workbench-launch"[^>]*href="yuanxing:\/\/open"/);assert(html.indexOf('id="updates-trigger"')<html.indexOf('id="workbench-launch"'));assert(html.indexOf('id="workbench-launch"')<html.indexOf('id="export-menu"'));
-    assert.match(html,/"readonly":true/);assert.match(html,/\.offline-share \.workbench-launch\{display:inline-flex\}/);
+    const link=html.match(/<a id="workbench-launch"[^>]*>/)?.[0];assert(link);
+    assert.match(link,/href="yuanxing:\/\/open"/);assert.match(link,/target="_blank"/);assert.match(link,/rel="noopener noreferrer"/);
+    assert.match(html,/<details class="workbench-launch-help"><summary aria-label="打开工作台遇到问题"/);assert.match(html,/双击桌面上的“元形工作台”，或让 AI 帮你打开。/);
+    assert(html.indexOf('id="updates-trigger"')<html.indexOf('id="workbench-launch"'));assert(html.indexOf('id="workbench-launch"')<html.indexOf('id="export-menu"'));
+    assert.match(html,/"readonly":true/);assert.match(html,/\.offline-share \.workbench-launch-group\{display:inline-flex\}/);
   }
 });
 test('原生启动入口只执行固定命令，不把网页 URL 当作文件、参数或脚本执行',()=>{
