@@ -89,3 +89,17 @@ test('真实生成的离线文件再次导出时保留压缩资源与研发读�
   const artifact=source.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1];
   for(const view of ['review','document','prototype']){const output=offlineExportHTML(source,view),boot=JSON.parse(output.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]);assert.equal(boot.view,view);assert.equal(output.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1],artifact);}
 });
+
+test('线上发布给脚本添加属性后仍能再次导出，且不携带发布平台注入的脚本',async()=>{
+  const {offlineExportHTML}=await import('../runtime/core.mjs');const source=await standalone(fixture(),{view:'review'});
+  const artifact=source.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1];
+  const published=source.replace('<head>','<head><script data-page-node-id="platform" src="/page/page_comm/inject.js"></script>')
+    .replace('<script>globalThis.YUANXING_BOOT=','<script data-page-node-id="boot" data-pnid-children="child" data-extra="a>b">\n globalThis.YUANXING_BOOT=');
+  assert.notEqual(published,source);
+  for(const view of ['review','document','prototype']){
+    const output=offlineExportHTML(published,view),boot=JSON.parse(output.match(/globalThis\.YUANXING_BOOT=([\s\S]*?);\s*<\/script>/)[1]);
+    assert.equal(boot.view,view);assert.equal(boot.flow,null);assert.equal(output.match(/<script id="yuanxing-artifact" type="application\/json">([\s\S]*?)<\/script>/)[1],artifact);
+    assert.doesNotMatch(output,/src="\/page\/page_comm\/inject\.js"/);
+    assert.equal(JSON.parse(offlineExportHTML(output,'review').match(/globalThis\.YUANXING_BOOT=([\s\S]*?);\s*<\/script>/)[1]).view,'review');
+  }
+});

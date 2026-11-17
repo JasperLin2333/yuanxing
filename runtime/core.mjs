@@ -7,11 +7,14 @@ export const clone = value => JSON.parse(JSON.stringify(value));
 export function offlineExportHTML(html,view){
   if(!['review','document','prototype'].includes(view))throw new Error('导出视图不正确');
   let found=false;
-  const output=html.replace(/(<script>globalThis\.YUANXING_BOOT=)([\s\S]*?)(;<\/script>)/,(match,start,json,end)=>{
+  const output=html.replace(/(<script\b(?:[^>"']|"[^"]*"|'[^']*')*>\s*globalThis\.YUANXING_BOOT\s*=\s*)([\s\S]*?)(;\s*<\/script\s*>)/i,(match,start,json,end)=>{
     found=true;const boot=JSON.parse(json);if(!boot.readonly)throw new Error('不是离线分享文件');boot.view=view;boot.flow=null;
     return start+JSON.stringify(boot).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029')+end;
   });
-  if(!found)throw new Error('离线分享数据缺失');return output;
+  if(!found)throw new Error('离线分享数据缺失');
+  // 线上发布平台可能在文档头插入自身脚本；离线文件不应依赖该脚本。
+  return output.replace(/<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>\s*<\/script\s*>/gi,(tag,attrs)=>
+    /(?:^|\s)data-page-node-id\s*=\s*(["'])[^"']*\1/i.test(attrs)&&/(?:^|\s)src\s*=\s*(["'])\/page\/page_comm\/inject\.js\1/i.test(attrs)?'':tag);
 }
 export const uid = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
