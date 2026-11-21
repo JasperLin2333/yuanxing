@@ -84,15 +84,26 @@ test('工作区记住已打开项目，入口校验已移除项目且项目指�
   const result=await openWorkbench({workspace:file,port:4318},{...options,project:'b'});assert.equal(result.url,'http://127.0.0.1:4318/p/b/');assert.equal(result.browserOpened,false);
   await assert.rejects(openWorkbench({workspace:file,port:4318},{...options,project:'gone'}),/项目不存在/);
 });
-test('三个离线视图可在新窗口请求本机启动，并提供无法打开时的帮助',async t=>{
+test('三个离线视图的更多菜单提供统一入口按钮与快速上手弹窗，本机编辑端可见快速上手',async t=>{
   const dir=await fixture(t),root=path.join(dir,'project');await run(['init',root,'--template','iteration']);const bundle=await (await createStore(root)).load();
   for(const view of ['review','document','prototype']){
     const html=await standalone(bundle,{view});
-    const link=html.match(/<a id="workbench-launch"[^>]*>/)?.[0];assert(link);
+    const menu=html.match(/<details id="handoff-menu"[\s\S]*?<\/details>/)?.[0];assert(menu);
+    const link=menu.match(/<a id="workbench-launch"[^>]*>/)?.[0];assert(link);
     assert.match(link,/href="yuanxing:\/\/open"/);assert.match(link,/target="_blank"/);assert.match(link,/rel="noopener noreferrer"/);
-    assert.match(html,/<details class="workbench-launch-help"><summary aria-label="打开工作台遇到问题"/);assert.match(html,/双击桌面上的“元形工作台”，或让 AI 帮你打开。/);
-    assert(html.indexOf('id="updates-trigger"')<html.indexOf('id="workbench-launch"'));assert(html.indexOf('id="workbench-launch"')<html.indexOf('id="export-menu"'));
-    assert.match(html,/"readonly":true/);assert.match(html,/\.offline-share \.workbench-launch-group\{display:inline-flex\}/);
+    assert.match(menu,/data-action="developer-mode"[^>]*>[\s\S]*开发交付模式/);
+    assert.match(menu,/id="guide-trigger"[^>]*data-action="open-guide"[^>]*>[\s\S]*快速上手/);
+    assert.equal(menu.includes('workbench-launch-help'),false);
+    const guide=html.match(/<dialog id="guide-dialog"[\s\S]*?<\/dialog>/)?.[0];assert(guide);
+    assert.match(guide,/快速上手 · 元形工作台/);
+    assert.match(guide,/双击桌面上的“元形工作台”/);
+    assert.match(guide,/首次使用/);assert.match(guide,/开发交付/);
+    assert(html.indexOf('id="handoff-menu"')<html.indexOf('id="workbench-launch"'));
+    assert(html.indexOf('id="workbench-launch"')<html.indexOf('id="guide-trigger"'));
+    assert.match(html,/"readonly":true/);
+    assert.match(html,/\.handoff-menu\{display:block;position:relative\}/);
+    assert.match(html,/\.handoff-menu-item\{display:flex;/);
+    assert.match(html,/class="guide-scene/);
   }
 });
 test('原生启动入口只执行固定命令，不把网页 URL 当作文件、参数或脚本执行',()=>{

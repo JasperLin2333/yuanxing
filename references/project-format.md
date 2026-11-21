@@ -3,15 +3,19 @@
 ## 文件结构
 
 ```text
-我的原型/
-  artifact/
-    workbench.json       页面引用、位置、连线、说明、文档编排与普通批注
-    pages/*.html         可继续编辑的页面
-    assets/*             项目图片、CSS 或普通 JavaScript
-  dist/                  可重复生成的离线交付
+工作区目录/
+  workspace.json         多项目工作区入口登记（可选，供左上角切换项目）
+  我的项目/
+    需求.md              唯一正式需求正文（与工作台「需求文档」双向同步）
+    调研/                竞品分析、客户反馈、访谈与参考截图（按需创建，仅作输入）
+    artifact/
+      workbench.json     页面引用、位置、连线、说明、文档编排与普通批注
+      pages/*.html       可继续编辑的页面
+      assets/*           项目图片、CSS 或普通 JavaScript
+    dist/                可重复生成的离线交付快照
 ```
 
-页面路径相对 `artifact`。本地 CSS、图片和普通 JavaScript 在加载和导出时内嵌；`<!-- include:components/shell.html -->` 可引用项目内公共片段。网络资源、嵌套 iframe、CSS `@import`、动态模块工程不直接支持，需要先适配为自包含页面。页面脚本在隔离的 iframe 内运行，没有父工作台的同源权限；使用真实接口、本地存储或顶层导航的代码不作为通用兼容能力。
+`需求.md` 与 `artifact/` 为项目的唯一正式信源；`调研/` 按需创建，用于归拢用户通过 AI 所做的调研、截图和讨论输入，确认的产品结论提炼进 `需求.md`，避免零散文件散落或旧草稿覆盖正式需求。页面路径相对 `artifact`。本地 CSS、图片和普通 JavaScript 在加载和导出时内嵌；`<!-- include:components/shell.html -->` 可引用项目内公共片段。网络资源、嵌套 iframe、CSS `@import`、动态模块工程不直接支持，需要先适配为自包含页面。页面脚本在隔离的 iframe 内运行，没有父工作台的同源权限；使用真实接口、本地存储或顶层导航的代码不作为通用兼容能力。
 
 ## 最小项目
 
@@ -90,18 +94,25 @@
 
 ```json
 "updates": [
-  {"id":"update-2026-01-01-expert","date":"2026-01-01","text":"创建专家时增加处理中状态。","node":"expert-create","label":"创建专家"}
+  {
+    "id": "update-2026-01-01-expert",
+    "date": "2026-01-01",
+    "text": "创建专家时增加处理中状态。",
+    "changes": [
+      {"title": "3.1 创建专家交互", "before": "点击提交后直接返回列表。", "after": "点击提交后进入处理中状态，完成后自动进入详情。"}
+    ]
+  }
 ]
 ```
 
-每项使用项目内唯一稳定 `id`、`YYYY-MM-DD` 日期和 `text`；可选 `node` 关联已有页面，`label` 为跳转按钮名称。页面被移除后仍保留历史文字，失效跳转不显示。Agent 按下方并行编辑方法从基线追加记录，保留用户及其他 Agent 的现有修改。
+每项使用项目内唯一稳定 `id`、`YYYY-MM-DD` 日期和 `text`；可选 `changes` 数组记录轻量改前/改后对比（每项含可选 `title` 章节或位置、`before` 修改前原文与 `after` 修改后内容，界面默认折叠并支持原地展开红绿对照）；仍兼容历史 `node`/`label` 字段。Agent 按下方并行编辑方法从基线追加记录，保留用户及其他 Agent 的现有修改。
 
 ```sh
-node "<Skill目录>/scripts/yuanxing.mjs" updates add --root "<项目目录>" --text "创建专家时增加处理中状态。" --node expert-create --label "创建专家"
+node "<Skill目录>/scripts/yuanxing.mjs" updates add --root "<项目目录>" --text "创建专家时增加处理中状态。" --section "3.1 创建专家交互" --before "点击提交后直接返回列表。" --after "点击提交后进入处理中状态，完成后自动进入详情。"
 node "<Skill目录>/scripts/yuanxing.mjs" updates list --root "<项目目录>"
 ```
 
-`updates add` 默认使用本地当天日期并生成唯一 `id`，可用 `--date`、`--id` 指定；校验关联页面存在，只追加这一条记录，通过共同基线保存，不必手写整份 JSON。修改或删除已有记录时，仍按下方并行编辑方法使用 `apply`。
+`updates add` 默认使用本地当天日期并生成唯一 `id`，可用 `--date`、`--id`、`--section`、`--before`、`--after` 指定；校验关联页面和变更字段格式，只追加这一条记录，通过共同基线保存，不必手写整份 JSON。修改或删除已有记录时，仍按下方并行编辑方法使用 `apply`。
 
 ## 普通批注
 
@@ -155,7 +166,7 @@ node "<Skill目录>/scripts/yuanxing.mjs" apply --root "<项目目录>" --base "
 {"version":1,"defaultProject":"crm","projects":[{"id":"crm","title":"客户管理","root":"./crm"},{"id":"portal","title":"用户门户","root":"./portal","extension":"scripts/yuanxing"}]}
 ```
 
-Agent 使用 `workspace add --workspace <文件> --root <项目> --id <标识>` 登记，设计迭代时使用 `open --workspace <文件> --reuse` 启动或复用工作台；仅新启动服务时自动开页。顶栏切换项目时先等待保存，保存失败或冲突时留在原项目。项目分别使用 `/p/<id>/` URL、保存版本、视图偏好和项目扩展，避免串数据。新增项目登记后刷新工作台即可出现在选择器；离线导出仅内嵌当前项目，不携带整个工作区。
+Agent 可使用 `init <项目目录> --name "客户管理" --workspace <工作区.json>` 一步建仓（含默认 `需求.md`）并登记，或用 `workspace add --workspace <文件> --root <项目> [--id <标识>]` 登记已有项目（省略 `--id` 时自动派生稳定标识）；设计迭代时使用 `open --workspace <文件> --reuse` 启动或复用工作台；仅新启动服务时自动开页。顶栏切换项目时先等待保存，保存失败或冲突时留在原项目。项目分别使用 `/p/<id>/` URL、保存版本、视图偏好和项目扩展，避免串数据。新增项目登记后刷新工作台即可出现在选择器；离线导出仅内嵌当前项目，不携带整个工作区。
 
 ## 项目扩展
 

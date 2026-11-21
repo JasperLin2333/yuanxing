@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import {spawn,execFile} from 'node:child_process';
 
 const home=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const help=`元形 · 用自然语言完成原型设计与流程评审
 
-node scripts/yuanxing.mjs init <目录> [--template blank|iteration] [--name 名称]
+node scripts/yuanxing.mjs init <目录> [--template blank|iteration] [--name 名称] [--workspace <工作区.json>] [--id 项目标识]
 node scripts/yuanxing.mjs add --root <目录> --source <HTML或图片> [--title 名称] [--id 标识] [--module 标识] [--width 1280 --height 800]
 node scripts/yuanxing.mjs connect --root <目录> --from <页面> --to <页面> --selector <CSS选择器> [--label 操作]
 node scripts/yuanxing.mjs connect --root <目录> --from <页面> --to <页面> --rect x,y,w,h [--label 操作]
-node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项目目录> --id <项目标识> [--name 名称]
+node scripts/yuanxing.mjs workspace add --workspace <工作区.json> --root <项目目录> [--id <项目标识>] [--name 名称]
 node scripts/yuanxing.mjs workspace list --workspace <工作区.json>
 node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] [--open]
 node scripts/yuanxing.mjs open [--root <项目目录> | --workspace <工作区.json>] [--project 标识] [--port 4318] [--reuse | --no-browser]
 node scripts/yuanxing.mjs desktop [--root <项目目录> | --workspace <工作区.json>]
 node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
-node scripts/yuanxing.mjs updates add --root <目录> --text <变更说明> [--date YYYY-MM-DD] [--node 页面标识] [--label 跳转名称] [--id 标识]
+node scripts/yuanxing.mjs updates add --root <目录> --text <变更说明> [--date YYYY-MM-DD] [--section 章节或位置] [--before 原文] [--after 新文] [--node 页面标识] [--label 跳转名称] [--id 标识]
 node scripts/yuanxing.mjs updates list --root <目录> [--json]
 node scripts/yuanxing.mjs locate --root <目录> [--query 关键词或页面标识] [--module 模块标识] [--limit 6] [--json]
 node scripts/yuanxing.mjs check --root <目录>
@@ -88,11 +88,12 @@ export async function run(args,{sessionToken}={}){
     const root=path.resolve(flags._[0]||required(flags,'root')),template=flags.template||'blank';
     if(await exists(root))throw new Error('目标目录已存在，请选择新目录');
     if(!['blank','iteration'].includes(template))throw new Error('模板应为 blank 或 iteration');
+    const title=flags.name||path.basename(root)||'我的原型';
     if(template==='iteration'){
-      const sample=path.join(home,'examples/product-iteration');
+      const sample=path.join(home,'examples/product-iteration'),packedModule=path.join(home,'runtime/iteration-template.mjs');
       if(await exists(sample))await fs.cp(sample,root,{recursive:true,errorOnExist:true,force:false});
       else{
-        const files=JSON.parse(await fs.readFile(path.join(home,'assets/iteration.json'),'utf8'));
+        const files=await exists(packedModule)?(await import(pathToFileURL(packedModule).href)).default:JSON.parse(await fs.readFile(path.join(home,'assets/iteration.json'),'utf8'));
         for(const [relative,data] of Object.entries(files)){
           const file=path.resolve(root,relative);if(!sameOrInside(root,file)||file===root)throw new Error('示例资源路径不正确');
           await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,Buffer.from(data,'base64'),{flag:'wx'});
@@ -101,9 +102,15 @@ export async function run(args,{sessionToken}={}){
     }
     else{
       await fs.mkdir(path.join(root,'artifact/pages'),{recursive:true});await fs.mkdir(path.join(root,'artifact/assets'));
-      await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify({version:1,nodeStateVersion:1,title:flags.name||'我的原型',entryModule:'main',modules:[{id:'main',title:'主要流程'}],nodes:[],edges:[],annotations:[]},null,2)+'\n',{flag:'wx'});
+      await fs.writeFile(path.join(root,'需求.md'),`# ${title}\n\n## 1. 背景与目标\n\n待补充需求背景、核心痛点与本期目标。\n\n## 2. 功能清单\n\n| 模块 | 功能点 | 说明 |\n| --- | --- | --- |\n| 主要流程 | 待补充 | 待补充 |\n\n## 3. 功能详情\n\n### 3.1 主要流程\n\n待补充交互流程与业务规则。\n`,{flag:'wx'});
+      await fs.writeFile(path.join(root,'artifact/workbench.json'),JSON.stringify({version:1,nodeStateVersion:1,title,entryModule:'main',modules:[{id:'main',title:'主要流程'}],nodes:[],edges:[],annotations:[],document:{version:1,blocks:[{id:'prd-main',type:'source',path:'需求.md'}]}},null,2)+'\n',{flag:'wx'});
     }
     if(template==='iteration'){const {migrateNodeState}=await import('../runtime/node-state.mjs');const file=path.join(root,'artifact/workbench.json'),model=migrateNodeState(JSON.parse(await fs.readFile(file,'utf8')));if(flags.name)model.title=flags.name;await fs.writeFile(file,JSON.stringify(model,null,2)+'\n');}
+    if(flags.workspace){
+      const {registerProject}=await import('../runtime/workspace.mjs');
+      const item=await registerProject(path.resolve(flags.workspace),{id:flags.id,title:flags.name,root});
+      console.log(`已创建 ${root} 并登记到工作区：${item.title}（${item.id}）`);return;
+    }
     console.log(`已创建 ${root}`);return;
   }
   if(command==='workspace'){
@@ -111,7 +118,7 @@ export async function run(args,{sessionToken}={}){
     const file=path.resolve(required(flags,'workspace'));
     if(flags._[0]==='list'){console.log(JSON.stringify(await readWorkspace(file),null,2));return;}
     if(flags._[0]!=='add')throw new Error('工作区操作应为 add 或 list');
-    const item=await registerProject(file,{id:required(flags,'id'),title:flags.name,root:required(flags,'root'),builder:flags.builder,validator:flags.validator,extension:flags.extension});console.log(`已登记 ${item.title}（${item.id}）`);return;
+    const item=await registerProject(file,{id:flags.id,title:flags.name,root:required(flags,'root'),builder:flags.builder,validator:flags.validator,extension:flags.extension});console.log(`已登记 ${item.title}（${item.id}）`);return;
   }
   if(command==='serve'&&flags.workspace){
     const {serveWorkspace}=await import('../runtime/workspace.mjs');
@@ -163,7 +170,8 @@ export async function run(args,{sessionToken}={}){
     if((model.updates||[]).some(item=>item.id===id))throw new Error('更新说明标识已存在');
     if(flags.node&&!model.nodes.some(n=>n.id===flags.node))throw new Error('关联页面不存在：'+flags.node);
     // 最新记录放在最前；并行新增由共同基线逐项合并。
-    model.updates=[{id,date,text,...(flags.node?{node:flags.node}:{}),...(flags.label?{label:flags.label}:{})},...(model.updates||[])];
+    const change=(flags.before!==undefined||flags.after!==undefined)?[{...(flags.section?{title:flags.section}:{}),...(flags.before!==undefined?{before:flags.before}:{}),...(flags.after!==undefined?{after:flags.after}:{})}]:null;
+    model.updates=[{id,date,text,...(flags.node?{node:flags.node}:{}),...(flags.label?{label:flags.label}:{}),...(change?{changes:change}:{})},...(model.updates||[])];
     const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));
     await store.save(model,revision,base);console.log(`已添加更新说明 ${id}`);return model.updates[0];
   }

@@ -663,6 +663,7 @@ export function validate(model) {
     if(!Array.isArray(model.updates))errors.push('更新说明格式不正确');
     else for(const update of model.updates){
       if(!update||typeof update!=='object'||Array.isArray(update)||typeof update.id!=='string'||!update.id||seen.has(update.id)||typeof update.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(update.date)||typeof update.text!=='string'||!update.text.trim()||update.node!==undefined&&typeof update.node!=='string'||update.label!==undefined&&typeof update.label!=='string')errors.push('更新说明格式不正确');
+      if(update?.changes!==undefined&&(!Array.isArray(update.changes)||!update.changes.length||update.changes.some(c=>!c||typeof c!=='object'||Array.isArray(c)||c.title!==undefined&&typeof c.title!=='string'||c.before!==undefined&&typeof c.before!=='string'||c.after!==undefined&&typeof c.after!=='string'||!c.before?.trim()&&!c.after?.trim())))errors.push('更新说明格式不正确');
       if(update?.id)seen.add(update.id);
     }
   }
@@ -994,9 +995,9 @@ export function markdown(text, images={}, {sourceLines=false}={}) {
   return out+(list?`</${list}>`:'')+(table?'</table>':'');
 }
 // 说明编辑区只序列化文字、基础格式与已上传图片，不保留外部粘贴的 HTML。
-export function readDescription(root) {
+export function readDescription(root, {important: includeImportant = true} = {}) {
   const children=el=>[...el.childNodes].reduce((text,child)=>{const block=child.nodeType===1&&['P','DIV','UL','OL','TABLE','H1','H2','H3','H4','H5','H6'].includes(child.tagName);return text+(block&&text&&!text.endsWith('\n')?'\n\n':'')+read(child);},'');
-  const important=value=>value?`<span style="color:#d92d20">${value}</span>`:'';
+  const important=value=>includeImportant&&value?`<span style="color:#d92d20">${value}</span>`:value;
   function read(el){
     if(el.nodeType===3)return el.textContent.replace(/\u00a0/g,' ');
     if(el.nodeType!==1||el.hasAttribute('data-upload-pending'))return '';
@@ -1007,7 +1008,7 @@ export function readDescription(root) {
     if(tag==='STRONG'||tag==='B')return `**${children(el)}**`;
     if(tag==='EM'||tag==='I')return `*${children(el)}*`;
     if(tag==='CODE'){
-      if(!el.querySelector?.('[data-yuanxing-important="true"]'))return '`'+children(el)+'`';
+      if(!includeImportant||!el.querySelector?.('[data-yuanxing-important="true"]'))return '`'+children(el)+'`';
       const code=node=>node.nodeType===3?'`'+node.textContent.replace(/\u00a0/g,' ')+'`':node.nodeType===1?(node.getAttribute?.('data-yuanxing-important')==='true'?important([...node.childNodes].map(code).join('')):[...node.childNodes].map(code).join('')):'';
       return [...el.childNodes].map(code).join('');
     }
@@ -1019,7 +1020,7 @@ export function readDescription(root) {
     }
     const value=children(el);return tag==='P'||tag==='DIV'?value+'\n\n':value;
   }
-  return children(root).replace(/\n{3,}/g,'\n\n').trim();
+  return children(root).replace(/<\/span><span style="color:#d92d20">/g,'').replace(/\n{3,}/g,'\n\n').trim();
 }
 export function importManifest(manifest) {
   const model={version:1,nodeStateVersion:1,title:'原型工作台',modules:[],nodes:[],edges:[],annotations:[]};

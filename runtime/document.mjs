@@ -38,13 +38,14 @@ export function documentSourceRange(text,section,omitHeading=false) {
     const heading=!fence&&lines[i].match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
     if(heading)headings.push({line:i,level:heading[1].length,title:heading[2]});
   }
-  if(!section)return {start:0,end:text.length,text,headings};
+  if(!section)return {start:0,end:text.length,text,headings,firstLine:0};
   const matches=headings.filter(h=>h.title===section);
   if(matches.length!==1)throw new Error(matches.length?'需求正文标题重复：'+section:'需求正文标题不存在：'+section);
   const start=matches[0],end=headings.find(h=>h.line>start.line&&h.level<=start.level)?.line??lines.length;
   const first=start.line+(omitHeading?1:0),raw=lines.slice(first,end).join('\n'),selected=raw.trim();
   const offset=lines.slice(0,first).reduce((length,line)=>length+line.length+1,0)+raw.length-raw.trimStart().length;
-  return {start:offset,end:offset+selected.length,text:selected,headings};
+  const firstLine=first+raw.slice(0,raw.length-raw.trimStart().length).split('\n').length-1;
+  return {start:offset,end:offset+selected.length,text:selected,headings,firstLine};
 }
 export const extractDocumentSource=(text,section,omitHeading=false)=>documentSourceRange(text,section,omitHeading).text;
 
@@ -83,18 +84,137 @@ export function toggleDocumentImportant(editor,range){
   }
   const selected=doc.createRange();selected.setStart(parts[0].target,0);const last=parts.at(-1).target;selected.setEnd(last,last.data.length);return selected;
 }
+const IMPORTANT_OPEN='<span style="color:#d92d20">';
+const IMPORTANT_CLOSE='</span>';
+const IMPORTANT_PROTECTED=/<span style="color:#d92d20">[\s\S]*?<\/span>|!\[[^\]\n]*\]\([^)\n]+\)/g;
+function countSubstring(text,token){
+  let count=0,index=0;
+  while((index=text.indexOf(token,index))>=0){count++;index+=token.length;}
+  return count;
+}
+function replaceUnprotectedPhrase(field,target,replacement,checkInline){
+  if(!target||!field.includes(target))return field;
+  if(checkInline&&(countSubstring(target,'`')%2!==0||countSubstring(target,'**')%2!==0))return field;
+  let out='',last=0;
+  const replaceSegment=(segment,baseOffset)=>{
+    let part='',pos=0;
+    while(pos<segment.length){
+      const idx=segment.indexOf(target,pos);
+      if(idx<0){part+=segment.slice(pos);break;}
+      if(!checkInline||countSubstring(field.slice(0,baseOffset+idx),'`')%2===0){
+        part+=segment.slice(pos,idx)+replacement;
+        pos=idx+target.length;
+      }else{
+        part+=segment.slice(pos,idx+1);
+        pos=idx+1;
+      }
+    }
+    return part;
+  };
+  for(const match of field.matchAll(IMPORTANT_PROTECTED)){
+    out+=replaceSegment(field.slice(last,match.index),last)+match[0];
+    last=match.index+match[0].length;
+  }
+  return out+replaceSegment(field.slice(last),last);
+}
+export function stripImportantMarkdown(text){
+  let out=String(text??'')
+    .replace(/`((?:<span style="color:#d92d20">|<\/span>)+)`/g,'$1')
+    .replace(/<span style="color:#d92d20">([\s\S]*?)<\/span>/g,'$1');
+  while(/(\*\*[^*\n]+)\*\*\*\*([^*\n]+\*\*)/.test(out))out=out.replace(/(\*\*[^*\n]+)\*\*\*\*([^*\n]+\*\*)/g,'$1$2');
+  return out;
+}
+export function applySourceImportant(text,important){
+  const source=String(text??'');
+  if(!Array.isArray(important)||!important.length)return source;
+  const lines=source.split('\n'),rows=[],slots=[];
+  let fence=null;
+  for(const line of lines){
+    const cr=line.endsWith('\r')?'\r':'',raw=cr?line.slice(0,-1):line;
+    const marker=raw.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if(marker){if(!fence)fence=marker[1][0];else if(fence===marker[1][0])fence=null;rows.push({type:'raw',raw,cr});continue;}
+    if(fence||/^#{1,6}\s+/.test(raw)){rows.push({type:'raw',raw,cr});continue;}
+    if(/^\s*\|.*\|\s*$/.test(raw)){
+      if(/^\s*\|[\s:|\-]+\|\s*$/.test(raw)){rows.push({type:'raw',raw,cr});continue;}
+      const parts=raw.split('|'),cells=[];
+      for(let col=1;col<parts.length-1;col++){
+        const match=parts[col].match(/^(\s*)(.*?)(\s*)$/);
+        const slot={prefix:match[1],field:match[2],suffix:match[3],matched:false};
+        cells.push(slot);if(slot.field)slots.push(slot);
+      }
+      rows.push({type:'table',parts,cells,cr});continue;
+    }
+    const match=raw.match(/^(\s*(?:(?:[-*]|\d+\.)\s+)?)(.*?)(\s*)$/);
+    if(!match[2]){rows.push({type:'raw',raw,cr});continue;}
+    const slot={prefix:match[1],field:match[2],suffix:match[3],matched:false};
+    slots.push(slot);rows.push({type:'line',slot,cr});
+  }
+  const entries=important.filter(item=>typeof item==='string'&&item.trim());
+  const markedEntries=entries.filter(item=>item.includes(IMPORTANT_OPEN));
+  const plainEntries=[...new Set(entries.filter(item=>!item.includes(IMPORTANT_OPEN)))].sort((a,b)=>b.length-a.length);
+  for(const entry of markedEntries){
+    const clean=stripImportantMarkdown(entry);
+    if(!clean)continue;
+    const exact=slots.find(slot=>!slot.matched&&stripImportantMarkdown(slot.field)===clean);
+    if(exact){exact.field=entry;exact.matched=true;continue;}
+    for(const slot of slots){
+      if(slot.matched)continue;
+      const updated=replaceUnprotectedPhrase(slot.field,clean,entry,false);
+      if(updated!==slot.field){slot.field=updated;slot.matched=true;}
+    }
+  }
+  for(const phrase of plainEntries){
+    for(const slot of slots)slot.field=replaceUnprotectedPhrase(slot.field,phrase,`${IMPORTANT_OPEN}${phrase}${IMPORTANT_CLOSE}`,true);
+  }
+  return rows.map(row=>{
+    if(row.type==='raw')return row.raw+row.cr;
+    if(row.type==='line')return row.slot.prefix+row.slot.field+row.slot.suffix+row.cr;
+    const nextParts=[...row.parts];
+    row.cells.forEach((cell,index)=>{nextParts[index+1]=cell.prefix+cell.field+cell.suffix;});
+    return nextParts.join('|')+row.cr;
+  }).join('\n');
+}
+export function collectSourceImportant(body,read=el=>el.textContent){
+  if(!body?.querySelectorAll)return [];
+  const items=[];
+  for(const editor of body.querySelectorAll('[data-source-line]')){
+    if(editor.dataset?.docImageFrame||(editor.matches?editor.matches('h1,h2,h3,h4,h5,h6'):/^H[1-6]$/.test(editor.tagName||'')))continue;
+    const marked=String(read(editor)??''),clean=stripImportantMarkdown(marked);
+    items.push({marked,clean});
+  }
+  const result=[];
+  for(const item of items){
+    if(item.marked===item.clean)continue;
+    const spans=[...new Set([...item.marked.matchAll(/<span style="color:#d92d20">(.+?)<\/span>/g)].map(m=>m[1]).filter(Boolean))];
+    const canShorten=spans.length>0&&applySourceImportant(item.clean,spans)===item.marked&&items.every(other=>{
+      if(other===item)return true;
+      if(other.clean===other.marked)return applySourceImportant(other.clean,spans)===other.clean;
+      return applySourceImportant(other.clean,spans)===other.marked||!spans.some(span=>other.clean.includes(span));
+    });
+    if(canShorten)result.push(...spans);
+    else result.push(item.marked);
+  }
+  return [...new Set(result)];
+}
 // 直接编辑只替换实际文字所在行或单元格，保留其余 Markdown、章节及原有空白。
-export function patchDocumentSource(text,block,{line,column,before,value}) {
+export function patchDocumentSource(text,block,{line,column,before,value,removeLine=false}) {
   const range=documentSourceRange(text,block.section,block.omitHeading),lines=range.text.split('\n');
   if(!Number.isInteger(line)||line<0||line>=lines.length||typeof before!=='string'||typeof value!=='string'||/[\r\n]/.test(value)||value.length>65536)throw new Error('文字修改位置或内容不正确');
+  value=stripImportantMarkdown(value);
   const raw=lines[line],parts=column===undefined?null:raw.split('|');let field,prefix,suffix;
   if(parts){if(!Number.isInteger(column)||column<0||column>=parts.length-2||value.includes('|'))throw new Error('表格文字修改不正确');field=parts[column+1];}
   else field=raw;
   const match=parts?field.match(/^(\s*)(.*?)(\s*)$/):field.match(/^(#{1,6}\s+)(.+?)(\s*#*\s*)$/)||field.match(/^(\s*(?:(?:[-*]|\d+\.)\s+)?)(.*?)(\s*)$/);
   [,prefix,field,suffix]=match;
-  if(field.replace(/\u00a0/g,' ').trim()!==before.replace(/\u00a0/g,' ').trim()){const error=new Error('这段文字已在别处修改，当前输入已保留，请让 AI 合并。');error.status=409;throw error;}
+  if(stripImportantMarkdown(field).replace(/\u00a0/g,' ').trim()!==stripImportantMarkdown(before).replace(/\u00a0/g,' ').trim()){const error=new Error('这段文字已在别处修改，当前输入已保留，请让 AI 合并。');error.status=409;throw error;}
+  const globalLine=range.firstLine+line,heading=range.headings.find(item=>item.line===globalLine);
+  if(removeLine){
+    if(value!==''||parts||heading||/^\s*\|.*\|\s*$/.test(raw))throw new Error('只能删除清空的正文段落或列表项');
+    const originalLines=text.split('\n');
+    originalLines.splice(globalLine,1);
+    return {text:originalLines.join('\n'),rename:null,removedLine:globalLine};
+  }
   if(parts){parts[column+1]=prefix+value+suffix;lines[line]=parts.join('|');}else lines[line]=prefix+value+suffix;
-  const globalLine=text.slice(0,range.start).split('\n').length-1+line,heading=range.headings.find(item=>item.line===globalLine);
   if(heading&&!value.trim())throw new Error('章节标题不能为空');
   return {text:text.slice(0,range.start)+lines.join('\n')+text.slice(range.end),rename:heading&&heading.title!==value?{before:heading.title,after:value}:null};
 }
@@ -193,6 +313,7 @@ export function validateDocument(model) {
         if(typeof block.path!=='string'||! /^(?!\/|\w+:)[^\\\u0000-\u001f]+\.md$/i.test(block.path)||block.path.split('/').some(v=>!v||v==='.'||v==='..'))errors.push('需求正文路径不正确');
         if(block.section!==undefined&&(typeof block.section!=='string'||!block.section.trim()))errors.push('需求正文标题不正确');
         if(block.omitHeading!==undefined&&typeof block.omitHeading!=='boolean')errors.push('需求正文标题设置不正确');
+        if(block.important!==undefined&&(!Array.isArray(block.important)||block.important.some(item=>typeof item!=='string'||!item.trim()||/[\r\n]/.test(item)||item.length>65536)))errors.push('需求正文重点说明配置不正确');
         if(block.imageFrames!==undefined){
           if(!block.imageFrames||typeof block.imageFrames!=='object'||Array.isArray(block.imageFrames))errors.push('需求正文图片画布配置不正确');
           else for(const [path,frame] of Object.entries(block.imageFrames)){
@@ -274,9 +395,51 @@ export function createDocumentOutline({root,paper,nav,toolbar}) {
   };
 }
 
+export function exportDocumentMarkdown(model,bundle={},explain=()=>''){
+  const doc=model?.document||defaultDocument(model);
+  const headingPrefix={heading1:'## ',heading2:'### ',heading3:'#### '};
+  const restoreSourceImages=(text,key)=>{
+    const paths=bundle?.documentImagePaths?.[key]||{};
+    if(!Object.keys(paths).length)return text;
+    return text.replace(/`[^`]*`|!\[([^\]\n]*)\]\(([^)\n]+)\)/g,(all,alt,url)=>url&&paths[url]?`![${alt}](${paths[url]})`:all);
+  };
+  const renderBlocks=blocks=>{
+    const out=[];
+    for(const block of blocks||[]){
+      if(!block||typeof block!=='object')continue;
+      if(block.type==='text'){
+        const text=stripImportantMarkdown(block.text||'').trim();if(!text)continue;
+        if(block.format==='quote')out.push(text.split('\n').map(line=>'> '+line).join('\n'));
+        else out.push((headingPrefix[block.format]||'')+text);
+      }else if(block.type==='source'){
+        const key=documentSourceKey(block),raw=restoreSourceImages(bundle?.documentSources?.[key]||'',key);
+        const text=stripImportantMarkdown(raw).trim();if(text)out.push(text);
+      }else if(block.type==='description'){
+        let raw='';
+        if(block.rule)raw=model?.rules?.[block.rule]||'';
+        else{const target=block.edge?model?.edges?.find(e=>e.id===block.edge):model?.nodes?.find(n=>n.id===block.node);if(target)raw=explain(target)||'';}
+        const text=stripImportantMarkdown(raw).trim();if(text)out.push(text);
+      }else if(block.type==='image'){
+        if(block.path)out.push(`![${block.alt||''}](${block.path})`);
+      }else if(block.type==='columns'){
+        for(const column of block.columns||[])out.push(...renderBlocks(column?.blocks));
+      }else if(block.type==='table'){
+        const rows=(block.rows||[]).map(row=>(row.cells||[]).map(cell=>renderBlocks(cell?.blocks).join(' ').replace(/\r?\n+/g,'<br>').replace(/\|/g,'\\|').trim()));
+        if(!rows.length)continue;
+        out.push([`| ${rows[0].join(' | ')} |`,`| ${rows[0].map(()=>'---').join(' | ')} |`,...rows.slice(1).map(r=>`| ${r.join(' | ')} |`)].join('\n'));
+      }
+    }
+    return out;
+  };
+  const parts=renderBlocks(doc?.blocks);
+  const title=String(doc?.title||model?.title||'需求文档').trim();
+  if(title&&(!parts.length||!/^#\s+/.test(parts[0])))parts.unshift('# '+title);
+  return parts.length?parts.join('\n\n')+'\n':'';
+}
+
 export function createDocumentView(host) {
   const root=host.root,cache=new Map(),bindings=new Set(),drafts=new Map();
-  let active=false,signature='',outline,sourceTimer,sourceFlight,readingPosition=null,restoreFrame=null;
+  let active=false,signature='',outline,sourceTimer,sourceFlight,sourceStructureChanged=false,readingPosition=null,restoreFrame=null;
   let usedPreviews=new Set();
   let importantTool,importantRange,importantEditor;
   let outlineOpen=typeof matchMedia!=='function'||!matchMedia('(max-width:700px)').matches;
@@ -284,17 +447,36 @@ export function createDocumentView(host) {
   const fieldChanged=callback=>host.changeText(model=>{ensureDocument(model);callback(model);});
   const titleOf=block=>host.model().nodes.find(node=>node.id===block.node)?.title||'原型页面';
   const reportSourceError=error=>host.notice(error.message,[['重试',()=>flushSources().catch(reportSourceError)]],'save');
+  const emptyText=editor=>!(editor.textContent||'').replace(/[\s\u200b\ufeff]/g,'')&&!editor.querySelector('img,video,audio,iframe,svg,canvas,hr,[contenteditable="false"]');
+  const removeKey=event=>['Backspace','Delete'].includes(event.key)&&!event.isComposing&&event.keyCode!==229&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey;
   function flushSources(){
     clearTimeout(sourceTimer);if(sourceFlight)return sourceFlight;
     sourceFlight=(async()=>{
       while(drafts.size){
         const [binding,value]=drafts.entries().next().value;
         if(value===binding.before){drafts.delete(binding);continue;}
-        const result=await host.saveSource({id:binding.id,key:binding.key,version:binding.version,line:binding.line,column:binding.column,before:binding.before,value});
-        for(const item of new Set([...bindings,...drafts.keys()]))if(item.version===result.beforeVersions[item.key]){item.key=result.keyChanges[item.key]||item.key;item.version=result.documentSourceVersions[item.key];}
-        binding.before=value;if(drafts.get(binding)===value)drafts.delete(binding);
+        const removeLine=value===null;
+        if(removeLine){await Promise.resolve();binding.editor.contentEditable='false';}
+        let result;
+        try{result=await host.saveSource({id:binding.id,key:binding.key,version:binding.version,line:binding.line,column:binding.column,before:binding.before,value:value??'',removeLine});}
+        catch(error){if(removeLine)binding.editor.contentEditable='true';throw error;}
+        for(const item of new Set([...bindings,...drafts.keys()])){
+          if(item.version!==result.beforeVersions[item.key])continue;
+          const shift=result.sourceLineShifts?.[item.key];
+          if(shift&&item.line===shift.removed)continue;
+          if(shift)item.line-=shift.offset+Number(item.line>shift.removed);
+          item.key=result.keyChanges[item.key]||item.key;item.version=result.documentSourceVersions[item.key];
+        }
+        if(removeLine){bindings.delete(binding);sourceStructureChanged=true;}
+        else binding.before=value;
+        if(drafts.get(binding)===value)drafts.delete(binding);
       }
-    })().finally(()=>{sourceFlight=null;if(!active&&!drafts.size)clearView();});return sourceFlight;
+    })().finally(()=>{
+      sourceFlight=null;
+      if(drafts.size)return;
+      if(!active)clearView();else if(sourceStructureChanged)render();
+      sourceStructureChanged=false;
+    });return sourceFlight;
   }
   function hideImportantTool(){if(importantTool)importantTool.hidden=true;importantRange=null;importantEditor=null;}
   function updateImportantTool(){
@@ -340,7 +522,8 @@ export function createDocumentView(host) {
     editable(editor,()=>onchange(host.read(editor)));return editor;
   }
   function sourceBody(block){
-    const body=el('div','doc-text markdown doc-source'),key=documentSourceKey(block);body.innerHTML=(host.sourceMarkdown||host.markdown)(host.bundle().documentSources?.[key]||'');
+    const body=el('div','doc-text markdown doc-source'),key=documentSourceKey(block),rawSource=host.bundle().documentSources?.[key]||'',rawLines=rawSource.split('\n');
+    body.innerHTML=(host.sourceMarkdown||host.markdown)(applySourceImportant(rawSource,block.important));
     const occurrences=new Map();
     for(const image of body.querySelectorAll('img[data-asset-path]')){
       const alias=image.getAttribute('data-asset-path'),path=host.bundle().documentImagePaths?.[key]?.[alias]||alias,config=block.imageFrames?.[path],node=config&&host.model().nodes.find(node=>node.id===config.node),paragraph=image.parentElement;
@@ -349,10 +532,44 @@ export function createDocumentView(host) {
       const id=JSON.stringify([block.id,path,occurrence]);paragraph.dataset.docImageFrame='true';paragraph.contentEditable='false';
       paragraph.replaceChildren(prototypeViewport(id,node,config,value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id)?.imageFrames?.[path];if(target)target.frameScale=value;})));
     }
+    const readClean=editor=>stripImportantMarkdown(host.read(editor));
+    const syncImportant=()=>{
+      const current=findDocumentBlock(host.model(),block.id)?.important||[],nextImportant=collectSourceImportant(body,host.read);
+      if(JSON.stringify(current)===JSON.stringify(nextImportant))return;
+      fieldChanged(model=>{
+        const target=findDocumentBlock(model,block.id);
+        if(!target)return;
+        if(nextImportant.length)target.important=nextImportant;
+        else delete target.important;
+      });
+    };
     if(!host.readonly&&host.saveSource)for(const editor of body.querySelectorAll('[data-source-line]')){
       if(editor.dataset.docImageFrame)continue;
-      const binding={id:block.id,key,version:host.bundle().documentSourceVersions?.[key],line:Number(editor.dataset.sourceLine),column:editor.dataset.sourceColumn===undefined?undefined:Number(editor.dataset.sourceColumn),before:host.read(editor)};bindings.add(binding);
-      editable(editor,()=>{drafts.set(binding,host.read(editor));clearTimeout(sourceTimer);sourceTimer=setTimeout(()=>flushSources().catch(reportSourceError),550);},{inline:true});
+      const line=Number(editor.dataset.sourceLine),column=editor.dataset.sourceColumn===undefined?undefined:Number(editor.dataset.sourceColumn);
+      const rawLine=rawLines[line]||'',rawField=column===undefined?rawLine:rawLine.split('|')[column+1]||'';
+      const hasLegacyImportant=rawField.includes(IMPORTANT_OPEN);
+      const binding={id:block.id,key,version:host.bundle().documentSourceVersions?.[key],line,column,before:hasLegacyImportant?host.read(editor):readClean(editor),editor};bindings.add(binding);
+      const canRemove=editor.matches('p,li');
+      editable(editor,()=>{
+        syncImportant();
+        const value=canRemove&&emptyText(editor)?null:readClean(editor);
+        if(value===binding.before){
+          drafts.delete(binding);
+          if(!drafts.size)clearTimeout(sourceTimer);
+          return;
+        }
+        drafts.set(binding,value);clearTimeout(sourceTimer);
+        if(value!==null)sourceTimer=setTimeout(()=>flushSources().catch(reportSourceError),550);
+      },{inline:true});
+      if(canRemove){
+        const keydown=editor.onkeydown;
+        editor.onkeydown=event=>{
+          if(!removeKey(event)||!emptyText(editor)){keydown(event);return;}
+          event.preventDefault();event.stopPropagation();
+          syncImportant();
+          drafts.set(binding,null);flushSources().catch(reportSourceError);
+        };
+      }
       editor.onblur=()=>{if(drafts.has(binding))flushSources().catch(reportSourceError);};
     }
     return body;
@@ -371,8 +588,7 @@ export function createDocumentView(host) {
     if(block.type==='text'){
       const editor=textEditor(block.text,value=>fieldChanged(model=>{const target=findDocumentBlock(model,block.id);if(target)target.text=value;}),block.format);
       if(!host.readonly&&host.changeStructure)editor.onkeydown=event=>{
-        if(!['Backspace','Delete'].includes(event.key)||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
-        if((editor.textContent||'').replace(/[\s\u200b\ufeff]/g,'')||editor.querySelector('img,video,audio,iframe,svg,canvas,hr,[contenteditable="false"]'))return;
+        if(!removeKey(event)||!emptyText(editor))return;
         const adjacent=[article.previousElementSibling?.dataset.docBlock,article.nextElementSibling?.dataset.docBlock].filter(Boolean);
         event.preventDefault();event.stopPropagation();
         host.changeStructure(model=>removeDocumentBlock(model,block.id));

@@ -5,7 +5,26 @@ export function updateSignature(updates){
   return (hash>>>0).toString(16);
 }
 
-export function createUpdates({getModel,openNode,leaveCurrent,storage,location=globalThis.location}){
+export function diffSegments(before='',after=''){
+  const a=[...String(before??'')],b=[...String(after??'')];
+  if(!a.length||!b.length)return {beforeParts:a.length?[{text:a.join(''),changed:false}]:[],afterParts:b.length?[{text:b.join(''),changed:false}]:[]};
+  let prefix=0;
+  while(prefix<a.length&&prefix<b.length&&a[prefix]===b[prefix])prefix++;
+  let suffix=0;
+  while(suffix<a.length-prefix&&suffix<b.length-prefix&&a[a.length-1-suffix]===b[b.length-1-suffix])suffix++;
+  const hasContext=prefix>0||suffix>0;
+  const build=(chars)=>{
+    const head=chars.slice(0,prefix).join(''),mid=chars.slice(prefix,chars.length-suffix).join(''),tail=suffix?chars.slice(chars.length-suffix).join(''):'';
+    return [{text:head,changed:false},{text:mid,changed:hasContext&&mid.length>0},{text:tail,changed:false}].filter(part=>part.text);
+  };
+  return {beforeParts:build(a),afterParts:build(b)};
+}
+
+function renderDiffText(container,parts){
+  for(const part of parts){const node=document.createElement(part.changed?'mark':'span');node.textContent=part.text;container.append(node);}
+}
+
+export function createUpdates({getModel,storage,location=globalThis.location}){
   const trigger=document.getElementById('updates-trigger'),dot=document.getElementById('updates-dot'),dialog=document.getElementById('updates-dialog'),body=document.getElementById('updates-content');
   const entries=()=>getModel()?.updates||[];
   const key=()=>`yuanxing-updates-read:${location.pathname}:${getModel()?.title||''}`;
@@ -20,9 +39,32 @@ export function createUpdates({getModel,openNode,leaveCurrent,storage,location=g
     let section,list,lastDate;
     for(const item of updates){
       if(item.date!==lastDate){section=document.createElement('section');const heading=document.createElement('h3');heading.textContent=item.date;list=document.createElement('ul');section.append(heading,list);body.append(section);lastDate=item.date;}
-      const row=document.createElement('li'),text=document.createElement('span');text.textContent=item.text;row.append(text);
-      const target=model.nodes.find(node=>node.id===item.node);
-      if(target){const link=document.createElement('button');link.type='button';link.className='updates-link';link.textContent='查看'+(item.label||target.title);link.onclick=()=>{dialog.close();leaveCurrent();openNode(target.id);};row.append(link);}
+      const row=document.createElement('li'),head=document.createElement('div'),text=document.createElement('span');
+      head.className='updates-item-head';text.className='updates-text';text.textContent=item.text;head.append(text);row.append(head);
+      if(Array.isArray(item.changes)&&item.changes.length){
+        const toggle=document.createElement('button');toggle.type='button';toggle.className='updates-diff-toggle';toggle.setAttribute('aria-expanded','false');toggle.textContent='查看变更';
+        const box=document.createElement('div');box.className='updates-diff-box';box.hidden=true;
+        for(const change of item.changes){
+          const card=document.createElement('div');card.className='updates-diff-item';
+          if(change.title){const title=document.createElement('div');title.className='updates-diff-title';title.textContent=change.title;card.append(title);}
+          const {beforeParts,afterParts}=diffSegments(change.before,change.after);
+          if(beforeParts.length){
+            const line=document.createElement('div');line.className='updates-diff-row is-before';
+            const sign=document.createElement('span');sign.className='updates-diff-sign';sign.textContent='−';
+            const content=document.createElement('div');content.className='updates-diff-text';
+            renderDiffText(content,beforeParts);line.append(sign,content);card.append(line);
+          }
+          if(afterParts.length){
+            const line=document.createElement('div');line.className='updates-diff-row is-after';
+            const sign=document.createElement('span');sign.className='updates-diff-sign';sign.textContent='＋';
+            const content=document.createElement('div');content.className='updates-diff-text';
+            renderDiffText(content,afterParts);line.append(sign,content);card.append(line);
+          }
+          box.append(card);
+        }
+        toggle.onclick=()=>{const next=!box.hidden;box.hidden=next;toggle.setAttribute('aria-expanded',String(!next));toggle.textContent=next?'查看变更':'收起变更';};
+        head.append(toggle);row.append(box);
+      }
       list.append(row);
     }
     dialog.showModal();try{(storage||globalThis.localStorage).setItem(key(),updateSignature(model.updates||[]));}catch{}refresh();

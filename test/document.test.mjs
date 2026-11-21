@@ -127,6 +127,32 @@ test('直接文字修订只替换对应行或单元格，保留 CRLF、编号、
   const first=patchDocumentSource(text,block,{line:1,before:'**原说明**',value:'**新说明**'});assert.equal(first.text,text.replace('原说明','新说明'));
   const cell=patchDocumentSource(first.text,block,{line:4,column:1,before:'- 可选',value:'- 必填'});assert.equal(cell.text,first.text.replace('- 可选','- 必填'));
 });
+test('清空引用正文的段落或列表项可删除原行，后续引用坐标仍指向原内容',async t=>{
+  const text='# 需求\r\n## 功能\r\n\r\n- 待删除\r\n紧随其后的段落\r\n## 其他\r\n保持原文\r\n';
+  const f=await editableProject(t,text);
+  const handler=createHandler(f.store,'session');
+  async function deleteLine(headers){
+    const request=Readable.from([JSON.stringify(f.change(2,'待删除',''))]);
+    Object.assign(request,{method:'DELETE',url:'/api/document/source',headers:{host:'localhost:4318',...headers}});
+    let status,data;
+    await handler(request,{writeHead(code){status=code;},end(value){data=JSON.parse(value);}});
+    return {status,data};
+  }
+  assert.equal((await deleteLine()).status,403);
+  assert.equal(await fs.readFile(path.join(f.root,'需求.md'),'utf8'),text);
+  const {status,data:saved}=await deleteLine({authorization:'Bearer session'});
+  assert.equal(status,200);
+  assert.equal(await fs.readFile(path.join(f.root,'需求.md'),'utf8'),text.replace('- 待删除\r\n',''));
+  const copyKey=documentSourceKey(saved.model.document.blocks[1]);
+  assert.deepEqual(saved.sourceLineShifts[f.key],{removed:2,offset:0});
+  assert.deepEqual(saved.sourceLineShifts[copyKey],{removed:0,offset:0});
+  await f.store.saveDocumentSource(f.change(0,'紧随其后的段落','',{
+    id:'source-copy',key:copyKey,version:saved.documentSourceVersions[copyKey],removeLine:true
+  }));
+  assert.equal(await fs.readFile(path.join(f.root,'需求.md'),'utf8'),text.replace('- 待删除\r\n紧随其后的段落\r\n',''));
+  assert.throws(()=>patchDocumentSource(text,f.block,{line:0,before:'功能',value:'',removeLine:true}),/只能删除/);
+  assert.throws(()=>patchDocumentSource('## 功能\n| 标题 | 说明 |\n| --- | --- |',f.block,{line:1,column:1,before:'说明',value:'',removeLine:true}),/只能删除/);
+});
 test('源文字保存接口写回 PRD，标题改名同步引用且重新加载有效',async t=>{
   const text='# 需求\n## 功能\n- **原说明**\n### 子章节\n原规则\n## 其他\n保持原文\n',f=await editableProject(t,text);
   const handler=createHandler(f.store,'session'),request=Readable.from([JSON.stringify(f.change(1,'**原说明**','**新说明**'))]);Object.assign(request,{method:'PUT',url:'/api/document/source',headers:{host:'localhost:4318',authorization:'Bearer session'}});let status,result;

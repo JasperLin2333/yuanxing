@@ -12,7 +12,7 @@ import {offlineCore,offlineLibrary,offlineApp,offlineStyles,offlineIndex,offline
 import {launchIdentity} from './launcher.mjs';
 import {safePath} from './paths.mjs';
 export {safePath} from './paths.mjs';
-import {documentSourceBlocks,documentSourceKey,extractDocumentSource,patchDocumentSource,walkDocument} from './document.mjs';
+import {documentSourceBlocks,documentSourceKey,documentSourceRange,extractDocumentSource,patchDocumentSource,walkDocument} from './document.mjs';
 import {clone,migrateNodeState,isDeletedNode,validate,exportSubset,expandHTML,importManifest,exportIssues,descriptionImagePaths,removeNodes,mergeProject} from './core.mjs';
 const exec=promisify(execFile),tool=path.dirname(fileURLToPath(import.meta.url));
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -172,11 +172,20 @@ export async function createStore(root,{builder,validator,extension}={}){
     const restore=value=>typeof value==='string'?value.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g,(all,alt,url)=>aliases.has(url)?`![${alt}](${aliases.get(url)})`:all):value;
     const patched=patchDocumentSource(original,block,{...change,before:restore(change.before),value:restore(change.value)}),next=clone(actual.model),beforeVersions={},documentSources={},documentSourceVersions={},documentImagePaths={},keyChanges={};
     const prior=documentSourceBlocks(actual.model).filter(item=>item.path===block.path),after=documentSourceBlocks(next).filter(item=>item.path===block.path);
-    for(const item of prior)beforeVersions[documentSourceKey(item)]=sha(extractDocumentSource(original,item.section,item.omitHeading));
+    const previousStarts={},sourceLineShifts={};
+    for(const item of prior){
+      const key=documentSourceKey(item),range=documentSourceRange(original,item.section,item.omitHeading);
+      beforeVersions[key]=sha(range.text);previousStarts[key]=range.firstLine;
+    }
     for(const item of after){
       const oldKey=documentSourceKey(item);if(patched.rename&&item.section===patched.rename.before)item.section=patched.rename.after;
       const key=documentSourceKey(item);keyChanges[oldKey]=key;
-      let text=extractDocumentSource(patched.text,item.section,item.omitHeading);documentSourceVersions[key]=sha(text);
+      const range=documentSourceRange(patched.text,item.section,item.omitHeading);
+      const text=range.text;documentSourceVersions[key]=sha(text);
+      if(patched.removedLine!==undefined){
+        const previousStart=previousStarts[oldKey];
+        sourceLineShifts[oldKey]={removed:patched.removedLine-previousStart,offset:range.firstLine-previousStart};
+      }
       const imagePaths=documentImagePaths[key]={};
       const replacements=new Map();
       for(const match of text.matchAll(/`[^`]*`|!\[[^\]\n]*\]\(([^)\n]+)\)/g))if(match[1]){
@@ -194,7 +203,7 @@ export async function createStore(root,{builder,validator,extension}={}){
       try{if(JSON.stringify(next)!==JSON.stringify(actual.model))revision=(await writeModel(next,actual.revision)).revision;}
       catch(error){if(await fs.readFile(file,'utf8')===patched.text)await fs.writeFile(file,original);throw error;}
     }finally{await fs.rm(tmp,{force:true});}
-    return {model:next,revision,documentSources,documentSourceVersions,documentImagePaths,beforeVersions,keyChanges};
+    return {model:next,revision,documentSources,documentSourceVersions,documentImagePaths,beforeVersions,keyChanges,sourceLineShifts};
   });}
   async function upload({type,data}){const allowed={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};if(!allowed[type]||typeof data!=='string'||!data.startsWith(`data:${type};base64,`))throw new Error('图片格式不支持');const bytes=Buffer.from(data.split(',')[1],'base64');const valid=type==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):type==='image/jpeg'?bytes[0]===255&&bytes[1]===216:bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP';if(!valid)throw new Error('图片内容不正确');await fs.mkdir(path.join(artifact,'assets'),{recursive:true});const relative=`assets/${randomUUID()}.${allowed[type]}`;await fs.writeFile(await safePath(artifact,relative,true),bytes,{flag:'wx'});return {path:relative};}
   async function importClipboard(input){
@@ -268,14 +277,14 @@ async function body(req){const parts=[];let bytes=0;for await(const part of req)
 export function createHandler(store,token,{basePath="",projectId,projects,launcherIdentity}={}){return async(req,res)=>{
   const send=(status,data,type='application/json')=>{res.writeHead(status,{'Content-Type':type+'; charset=utf-8','Cache-Control':'no-store'});res.end(type==='application/json'?JSON.stringify(data):data);};
   try{const url=new URL(req.url,'http://localhost');const host=req.headers.host||'';if(!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))return send(403,{error:'仅允许本机访问'});
-    if(['PUT','POST'].includes(req.method)){if(req.headers.authorization!==`Bearer ${token}`||req.headers.origin&&new URL(req.headers.origin).host!==host)return send(403,{error:'请求来源不正确'});}
+    if(['PUT','POST','DELETE'].includes(req.method)){if(req.headers.authorization!==`Bearer ${token}`||req.headers.origin&&new URL(req.headers.origin).host!==host)return send(403,{error:'请求来源不正确'});}
     if(req.method==='GET'&&url.pathname==='/api/launcher')return send(200,{app:'yuanxing',identity:launcherIdentity});
     if(req.method==='GET'&&url.pathname==='/api/project')return send(200,await store.load());
     if(req.method==='GET'&&url.pathname==='/api/project/status')return send(200,await store.status());
     if(req.method==='PUT'&&url.pathname==='/api/project'){const data=await body(req);return send(200,await store.save(data.model,data.revision,data.baseModel));}
     if(req.method==='POST'&&url.pathname==='/api/image')return send(200,await store.upload(await body(req)));
     if(req.method==='POST'&&url.pathname==='/api/clipboard/import')return send(200,await store.importClipboard(await body(req)));
-    if(req.method==='PUT'&&url.pathname==='/api/document/source')return send(200,await store.saveDocumentSource(await body(req)));
+    if(['PUT','DELETE'].includes(req.method)&&url.pathname==='/api/document/source')return send(200,await store.saveDocumentSource({...await body(req),removeLine:req.method==='DELETE'}));
     if(req.method==='POST'&&url.pathname==='/api/export'){await store.check();return send(200,await standalone(await store.load(),{...await body(req),extension:store.extension}),'text/html');}
     if(req.method==='GET'&&url.pathname==='/'){const runtimeVersion=(await store.status()).runtimeVersion,projectKey=sha(store.root);let html=await fs.readFile(path.join(tool,'index.html'),'utf8');html=html.replace('<script type="module" src="/app.mjs">',`<script>globalThis.YUANXING_BOOT={...${JSON.stringify({token,basePath,projectId,projects,runtimeVersion,projectKey}).replace(/</g,"\\u003c")}};</script><script type="module" src="/app.mjs">`);if(basePath)html=html.replace('href="/style.css"',`href="${basePath}/style.css"`).replace('src="/app.mjs"',`src="${basePath}/app.mjs"`);return send(200,html,'text/html');}
     if(req.method==='GET'&&url.pathname==='/extension.mjs')return send(200,store.extension?await extensionSource(store.extension,store.extension.entry,basePath):await fs.readFile(path.join(tool,'extension.mjs'),'utf8'),'text/javascript');

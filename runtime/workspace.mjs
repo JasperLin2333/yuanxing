@@ -1,12 +1,20 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
 import {createStore,createHandler,gracefulShutdown} from './server.mjs';
 import {launchIdentity} from './launcher.mjs';
 
 const validId=id=>typeof id==='string'&&/^[a-zA-Z][\w-]*$/.test(id);
+export function deriveProjectId(nameOrRoot,existingIds=new Set()){
+  const base=path.basename(String(nameOrRoot||'project')).trim();
+  const slug=base.replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase();
+  const head=slug?(/^[a-zA-Z]/.test(slug)?slug:`p-${slug}`):`project-${createHash('sha1').update(base||'project').digest('hex').slice(0,6)}`;
+  let candidate=head,suffix=2;
+  while(existingIds.has(candidate))candidate=`${head}-${suffix++}`;
+  return candidate;
+}
 export async function readWorkspace(file){
   file=path.resolve(file);const config=JSON.parse(await fs.readFile(file,'utf8'));
   if(config.version!==1||!Array.isArray(config.projects)||!config.projects.length)throw new Error('工作区需至少登记一个项目');
@@ -24,15 +32,20 @@ export async function readWorkspace(file){
 
 // 项目登记由 Agent 完成；工作台只提供切换。文件不放在 Skill 安装目录中。
 export async function registerProject(file,{id,title,root,builder,validator,extension}){
-  if(!validId(id))throw new Error('请指定字母开头的项目 --id');
+  if(id!==undefined&&!validId(id))throw new Error('请指定字母开头的项目 --id');
   file=path.resolve(file);root=await fs.realpath(path.resolve(root));
   const store=await createStore(root,{builder,validator,extension});await store.readModel();
   await fs.mkdir(path.dirname(file),{recursive:true});
   const lock=await fs.open(file+'.lock','wx').catch(error=>{if(error.code==='EEXIST')throw new Error('工作区正在更新，请稍后重试');throw error;});
   const tmp=file+'.'+randomUUID()+'.tmp';
   try{
-    let config;try{config=JSON.parse(await fs.readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;config={version:1,defaultProject:id,projects:[]};}
+    let config;try{config=JSON.parse(await fs.readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;config={version:1,defaultProject:id||'',projects:[]};}
     if(config.projects.length)await readWorkspace(file);
+    if(id===undefined){
+      for(const item of config.projects)if(await fs.realpath(path.resolve(path.dirname(file),item.root))===root){id=item.id;break;}
+      if(id===undefined)id=deriveProjectId(title||path.basename(root),new Set(config.projects.map(item=>item.id)));
+    }
+    if(!config.defaultProject)config.defaultProject=id;
     const previous=config.projects.find(item=>item.id===id);
     if(previous&&await fs.realpath(path.resolve(path.dirname(file),previous.root))!==root)throw new Error('项目标识已被其他目录使用');
     for(const item of config.projects)if(item.id!==id&&await fs.realpath(path.resolve(path.dirname(file),item.root))===root)throw new Error('此项目已经登记为 '+item.id);
