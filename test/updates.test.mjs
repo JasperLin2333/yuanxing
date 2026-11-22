@@ -75,6 +75,7 @@ test('命令行追加更新说明：校验页面、日期与标识，只改 upda
   await assert.rejects(run(['updates','add','--root',root,'--text','页面','--node','missing']),/关联页面不存在/);
   await assert.rejects(run(['updates','add','--root',root,'--text','日期','--date','2026-02-30']),/日期/);
   await assert.rejects(run(['updates','add','--root',root,'--text','   ']),/不能为空/);
+  await assert.rejects(run(['updates','add','--root',root,'--text','章节','--section','1.1 背景']),/--section 需搭配/);
   const listed=await run(['updates','list','--root',root,'--json']);assert.deepEqual(listed.map(u=>u.date),['2026-10-29','2026-01-02']);
   assert.equal(JSON.parse(await fs.readFile(file,'utf8')).updates.length,2);
 });

@@ -112,7 +112,7 @@ node "<Skill目录>/scripts/yuanxing.mjs" updates add --root "<项目目录>" --
 node "<Skill目录>/scripts/yuanxing.mjs" updates list --root "<项目目录>"
 ```
 
-`updates add` 默认使用本地当天日期并生成唯一 `id`，可用 `--date`、`--id`、`--section`、`--before`、`--after` 指定；校验关联页面和变更字段格式，只追加这一条记录，通过共同基线保存，不必手写整份 JSON。修改或删除已有记录时，仍按下方并行编辑方法使用 `apply`。
+`updates add` 默认使用本地当天日期并生成唯一 `id`，可用 `--date`、`--id` 指定。用 `--before` 或 `--after` 提供对比内容，可用 `--section` 给对比标注章节。命令通过共同基线追加一条记录。修改或删除已有记录时，按下方并行编辑方法使用 `apply`。
 
 ## 普通批注
 

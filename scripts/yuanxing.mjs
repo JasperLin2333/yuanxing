@@ -88,6 +88,7 @@ export async function run(args,{sessionToken}={}){
     const root=path.resolve(flags._[0]||required(flags,'root')),template=flags.template||'blank';
     if(await exists(root))throw new Error('目标目录已存在，请选择新目录');
     if(!['blank','iteration'].includes(template))throw new Error('模板应为 blank 或 iteration');
+    if(flags.workspace&&flags.id!==undefined)identifier(flags.id);
     const title=flags.name||path.basename(root)||'我的原型';
     if(template==='iteration'){
       const sample=path.join(home,'examples/product-iteration'),packedModule=path.join(home,'runtime/iteration-template.mjs');
@@ -108,8 +109,13 @@ export async function run(args,{sessionToken}={}){
     if(template==='iteration'){const {migrateNodeState}=await import('../runtime/node-state.mjs');const file=path.join(root,'artifact/workbench.json'),model=migrateNodeState(JSON.parse(await fs.readFile(file,'utf8')));if(flags.name)model.title=flags.name;await fs.writeFile(file,JSON.stringify(model,null,2)+'\n');}
     if(flags.workspace){
       const {registerProject}=await import('../runtime/workspace.mjs');
-      const item=await registerProject(path.resolve(flags.workspace),{id:flags.id,title:flags.name,root});
-      console.log(`已创建 ${root} 并登记到工作区：${item.title}（${item.id}）`);return;
+      const workspace=path.resolve(flags.workspace);
+      try{
+        const item=await registerProject(workspace,{id:flags.id,title:flags.name,root});
+        console.log(`已创建 ${root} 并登记到工作区：${item.title}（${item.id}）`);return;
+      }catch(error){
+        throw new Error(`项目已创建：${root}\n工作区 ${workspace} 登记失败：${error.message}\n处理登记问题后，用 workspace add 登记已创建的项目。`,{cause:error});
+      }
     }
     console.log(`已创建 ${root}`);return;
   }
@@ -169,6 +175,7 @@ export async function run(args,{sessionToken}={}){
     const id=identifier(flags.id||`update-${date}-${randomBytes(3).toString('hex')}`);
     if((model.updates||[]).some(item=>item.id===id))throw new Error('更新说明标识已存在');
     if(flags.node&&!model.nodes.some(n=>n.id===flags.node))throw new Error('关联页面不存在：'+flags.node);
+    if(flags.section!==undefined&&!flags.before?.trim()&&!flags.after?.trim())throw new Error('--section 需搭配有内容的 --before 或 --after');
     // 最新记录放在最前；并行新增由共同基线逐项合并。
     const change=(flags.before!==undefined||flags.after!==undefined)?[{...(flags.section?{title:flags.section}:{}),...(flags.before!==undefined?{before:flags.before}:{}),...(flags.after!==undefined?{after:flags.after}:{})}]:null;
     model.updates=[{id,date,text,...(flags.node?{node:flags.node}:{}),...(flags.label?{label:flags.label}:{}),...(change?{changes:change}:{})},...(model.updates||[])];

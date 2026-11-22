@@ -94,3 +94,19 @@ test('init 支持一步初始化需求文档并自动派生标识登记到工作
   assert.equal(ws.projects[3].id,'slug-folder');
   await assert.rejects(registerProject(file,{id:'123',root:third}),/字母开头/);
 });
+
+test('工作区登记失败时保留项目和原配置，修正配置后可独立重试',async t=>{
+  const dir=await fixture(t),file=path.join(dir,'workspace.json'),root=path.join(dir,'项目');
+  const config=JSON.stringify({version:2,projects:[]});
+  await fs.writeFile(file,config);
+  await assert.rejects(run(['init',root,'--workspace',file,'--id','123']),/字母开头/);
+  await assert.rejects(fs.access(root),{code:'ENOENT'});
+  await assert.rejects(run(['init',root,'--workspace',file]),/项目已创建：[\s\S]*工作区配置格式不正确[\s\S]*workspace add/);
+  await fs.access(path.join(root,'需求.md'));
+  assert.equal(await fs.readFile(file,'utf8'),config);
+  await fs.writeFile(file,JSON.stringify({version:1,defaultProject:'old',projects:[]}));
+  await run(['workspace','add','--workspace',file,'--root',root]);
+  const workspace=await readWorkspace(file);
+  assert.equal(workspace.projects.length,1);
+  assert.equal(workspace.defaultProject,workspace.projects[0].id);
+});

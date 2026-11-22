@@ -15,9 +15,14 @@ export function deriveProjectId(nameOrRoot,existingIds=new Set()){
   while(existingIds.has(candidate))candidate=`${head}-${suffix++}`;
   return candidate;
 }
+async function readWorkspaceConfig(file){
+  const config=JSON.parse(await fs.readFile(file,'utf8'));
+  if(config?.version!==1||!Array.isArray(config.projects))throw new Error('工作区配置格式不正确：需要 version: 1 和 projects 数组');
+  return config;
+}
 export async function readWorkspace(file){
-  file=path.resolve(file);const config=JSON.parse(await fs.readFile(file,'utf8'));
-  if(config.version!==1||!Array.isArray(config.projects)||!config.projects.length)throw new Error('工作区需至少登记一个项目');
+  file=path.resolve(file);const config=await readWorkspaceConfig(file);
+  if(!config.projects.length)throw new Error('工作区需至少登记一个项目');
   const ids=new Set(),roots=new Set(),projects=[];
   for(const item of config.projects){
     if(!validId(item.id)||ids.has(item.id)||typeof item.root!=='string')throw new Error('项目标识重复或配置不正确');
@@ -39,13 +44,13 @@ export async function registerProject(file,{id,title,root,builder,validator,exte
   const lock=await fs.open(file+'.lock','wx').catch(error=>{if(error.code==='EEXIST')throw new Error('工作区正在更新，请稍后重试');throw error;});
   const tmp=file+'.'+randomUUID()+'.tmp';
   try{
-    let config;try{config=JSON.parse(await fs.readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;config={version:1,defaultProject:id||'',projects:[]};}
+    let config;try{config=await readWorkspaceConfig(file);}catch(error){if(error.code!=='ENOENT')throw error;config={version:1,projects:[]};}
     if(config.projects.length)await readWorkspace(file);
     if(id===undefined){
       for(const item of config.projects)if(await fs.realpath(path.resolve(path.dirname(file),item.root))===root){id=item.id;break;}
       if(id===undefined)id=deriveProjectId(title||path.basename(root),new Set(config.projects.map(item=>item.id)));
     }
-    if(!config.defaultProject)config.defaultProject=id;
+    if(!config.projects.length||!config.defaultProject)config.defaultProject=id;
     const previous=config.projects.find(item=>item.id===id);
     if(previous&&await fs.realpath(path.resolve(path.dirname(file),previous.root))!==root)throw new Error('项目标识已被其他目录使用');
     for(const item of config.projects)if(item.id!==id&&await fs.realpath(path.resolve(path.dirname(file),item.root))===root)throw new Error('此项目已经登记为 '+item.id);
