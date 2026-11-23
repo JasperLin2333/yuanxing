@@ -583,7 +583,7 @@ blockquote.doc-text[contenteditable="true"]:focus{background:#ebf7ef;border-left
 .guide-mini-shortcut{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);font-size:11px;color:var(--ink)}
 .guide-mini-shortcut b{display:block;font-weight:600}
 .guide-mini-shortcut span{display:block;font-size:10px;color:var(--muted)}
-.guide-mini-sdot{width:10px;height:10px;flex:none;border-radius:3px;background:var(--green)}
+.guide-mini-sdot{width:10px;height:10px;flex:none;border-radius:3px;background:#AD624B}
 .guide-mini-crumbs{font-size:10px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .guide-mini-pick{display:grid;place-items:center;height:56px;border:1.5px dashed #3183e7;border-radius:6px;background:rgba(49,131,231,.07)}
 .guide-mini-pick span{padding:2px 8px;border-radius:5px;background:#3183e7;color:#fff;font-size:10.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
