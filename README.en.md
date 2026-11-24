@@ -113,4 +113,5 @@ npx skills add JasperLin2333/context-continuity --skill context-continuity
 
 - [Skill Entry (SKILL.md)](SKILL.md) · [Project Format](references/project-format.md) · [Workbench Guide](references/workbench.md) · [Document & Export Protocol](references/document.md)
 - Contributing & issues: [CONTRIBUTING.md](CONTRIBUTING.md) · [GitHub Issues](https://github.com/JasperLin2333/yuanxing/issues)
+- Author: [Jasper Lin](https://github.com/JasperLin2333) (AI Product Manager · B2B Workflows & Agents) · [Contact](mailto:jasperlin2333@gmail.com)
 - License: [MIT](LICENSE) · Third-party components (`libavoid`, `fflate`, `draw.io` routing): [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)

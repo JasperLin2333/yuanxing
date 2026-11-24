@@ -219,4 +219,6 @@ node scripts/yuanxing.mjs export --root ./my-iteration --view prototype
 
 更多操作见[工作台手册](references/workbench.md)，开发维护见[贡献说明](CONTRIBUTING.md)。遇到问题可在 [Issues](https://github.com/JasperLin2333/yuanxing/issues) 描述具体场景。
 
+作者：[Jasper Lin](https://github.com/JasperLin2333)（B 端与 Agent 方向 AI 产品经理）· [即刻动态](https://web.okjike.com/u/13a3f63b-4381-4ae2-bbbf-4f5c56895839) · [邮件交流](mailto:jasperlin2333@gmail.com)
+
 主代码采用 [MIT](LICENSE) 许可证；附带组件的来源与许可见[第三方说明](THIRD_PARTY_NOTICES.md)。
