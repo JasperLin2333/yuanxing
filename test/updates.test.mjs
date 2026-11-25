@@ -3,24 +3,22 @@ import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {createUpdates,diffSegments,formatUpdatesMarkdown,orderedUpdates} from '../runtime/updates.mjs';
+import {createUpdates,diffSegments} from '../runtime/updates.mjs';
 import {clone,mergeProject,validate,removeNodes} from '../runtime/core.mjs';
 import {createHandler,standalone} from '../runtime/server.mjs';
 import {run} from '../scripts/yuanxing.mjs';
 
 function fixture(){return {version:1,title:'协作项目',entryModule:'main',modules:[{id:'main',title:'主流程',entry:'one'}],nodes:[{id:'one',module:'main',title:'客户列表',kind:'html',path:'pages/one.html',width:1280,height:800,x:0,y:0}],edges:[],annotations:[]};}
 function element(tag='div'){
-  return {tag,children:[],attrs:{},handlers:{},hidden:false,textContent:'',append(...items){this.children.push(...items);},prepend(item){this.children.unshift(item);},replaceChildren(...items){this.children=items;},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,v){this.handlers[k]=v;},showModal(){this.open=true;},close(){this.open=false;},select(){this.selected=true;}};
+  return {tag,children:[],attrs:{},handlers:{},hidden:false,textContent:'',append(...items){this.children.push(...items);},replaceChildren(){this.children=[];},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,v){this.handlers[k]=v;},showModal(){this.open=true;},close(){this.open=false;}};
 }
 
-test('工作台按日期展示并复制更新说明，保留折叠对照、已读标记和手动复制入口',async()=>{
-  const ids=Object.fromEntries(['trigger','dot','dialog','content','close','range','baseline','copy-range','copy-status','copy-text'].map(id=>['updates-'+id,element()]));
+test('工作台按日期展示更新说明、支持条目内折叠红绿对比，已读状态随内容变化且不跨项目',()=>{
+  const ids=Object.fromEntries(['updates-trigger','updates-dot','updates-dialog','updates-content','updates-close'].map(id=>[id,element()]));
   const oldDocument=globalThis.document;globalThis.document={getElementById:id=>ids[id],createElement:tag=>element(tag)};
   try{
     const model=fixture(),storageMap=new Map(),storage={getItem:k=>storageMap.get(k),setItem:(k,v)=>storageMap.set(k,v)};
-    let copyAvailable=true;
-    const copied=[];
-    const ui=createUpdates({getModel:()=>model,copy:async text=>{if(!copyAvailable)throw new Error('剪贴板不可用');copied.push(text);},storage,location:{pathname:'/p/one/'}});
+    const ui=createUpdates({getModel:()=>model,storage,location:{pathname:'/p/one/'}});
     ui.refresh();assert.equal(ids['updates-dot'].hidden,true);ids['updates-trigger'].handlers.click();assert.equal(ids['updates-content'].children[0].textContent,'暂无更新说明');ids['updates-dialog'].close();
     model.updates=[
       {id:'a',date:'2026-01-01',text:'旧变更'},
@@ -36,53 +34,11 @@ test('工作台按日期展示并复制更新说明，保留折叠对照、已�
     const afterMarks=diffItem.children[2].children[1].children.filter(c=>c.tag==='mark').map(c=>c.textContent);
     assert.deepEqual(beforeMarks,['60 秒后丢弃']);assert.deepEqual(afterMarks,['5 分钟后兜底']);
     toggle.onclick();assert.equal(diffBox.hidden,true);assert.equal(toggle.textContent,'查看变更');
-    await head.children[2].onclick();
-    assert.match(copied[0],/等待 60 秒后丢弃。/);
-    assert.doesNotMatch(copied[0],/旧变更/);
-    const baseline=ids['updates-baseline'],rangeButton=ids['updates-copy-range'];
-    assert.equal(rangeButton.disabled,true);
-    baseline.value='1';baseline.handlers.change();
-    assert.equal(rangeButton.disabled,false);
-    await rangeButton.onclick();
-    assert.match(copied[1],/2026-01-01之后（旧变更） → 2026-10-28/);
-    copyAvailable=false;
-    await rangeButton.onclick();
-    assert.equal(ids['updates-copy-text'].hidden,false);
-    assert.equal(ids['updates-copy-text'].selected,true);
-    assert.equal(ids['updates-copy-text'].value,copied[1]);
     model.updates[1].text='修订后的变更';ui.refresh();assert.equal(ids['updates-dot'].hidden,false);
     model.title='另一个项目';ui.refresh();assert.equal(ids['updates-dot'].hidden,false);
-    model.nodes=[];ids['updates-trigger'].handlers.click();assert.equal(ids['updates-content'].children[0].children[1].children[0].children[0].children.length,3);
+    model.nodes=[];ids['updates-trigger'].handlers.click();assert.equal(ids['updates-content'].children[0].children[1].children[0].children[0].children.length,2);
     const plain=diffSegments('全新说明','另一句');assert.equal(plain.beforeParts[0].changed,false);assert.equal(plain.afterParts[0].changed,false);
   }finally{globalThis.document=oldDocument;}
-});
-
-test('区间复制保留起止原文，历史逐次保留，新增后撤回不出现在净变化中',()=>{
-  const first={date:'2026-11-25',time:'09:00',text:'第一批',changes:[
-    {key:'approval',title:'提交规则',before:'原文\n- 允许提交',after:'中间稿'},
-    {key:'draft',title:'临时规则',before:'',after:'暂用文案'},
-    {title:'展示规则',before:'折叠',after:'展开一次'},
-    {title:'待补充的旧记录',after:'既有摘要'}
-  ]};
-  const last={date:'2026-11-25',time:'10:30:04',text:'第二批',changes:[
-    {key:'approval',title:'3.1 提交条件',before:'中间稿',after:'终版\n\n| 权限 | 行为 |\n| --- | --- |\n| 有 | 提交 |'},
-    {key:'draft',title:'临时规则',before:'暂用文案',after:''},
-    {title:'展示规则',before:'展开一次',after:'默认展开'}
-  ]};
-  const summary={date:'2026-11-24',text:'旧摘要'};
-  const updates=orderedUpdates([first,summary,last]);
-  assert.deepEqual(updates,[last,first,summary]);
-  const combined=formatUpdatesMarkdown('协作项目',updates,{combine:true});
-  assert.match(combined,/3\.1 提交条件/);
-  assert.match(combined,/原文\n- 允许提交/);
-  assert.match(combined,/\| 有 \| 提交 \|/);
-  assert.match(combined,/折叠[\s\S]*默认展开/);
-  assert.match(combined,/待补充的旧记录[\s\S]*当时未记录/);
-  assert.match(combined,/仅记录了摘要的更新[\s\S]*旧摘要/);
-  assert.doesNotMatch(combined,/中间稿|展开一次|暂用文案|临时规则/);
-  const historical=formatUpdatesMarkdown('协作项目',[first]);
-  assert.match(historical,/09:00[\s\S]*中间稿[\s\S]*临时规则[\s\S]*（无正文）/);
-  assert.equal(first.changes[0].after,'中间稿');
 });
 
 test('更新说明可与旧项目兼容，并发新增逐项合并，删除页面保留历史并校验对比格式',()=>{
@@ -97,7 +53,7 @@ test('更新说明可与旧项目兼容，并发新增逐项合并，删除页�
 test('三种离线视图包含项目更新记录而不依赖项目扩展',async()=>{
   const model=fixture();model.updates=[{id:'u1',date:'2026-10-28',text:'这次更新',node:'one'}];
   const bundle={model,resources:{one:'<main>页面</main>'},fragments:{},images:{},documentSources:{}};
-  for(const view of ['review','document','prototype']){const html=await standalone(bundle,{view});const boot=JSON.parse(html.match(/<script>globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]);assert.deepEqual(boot.bundle.model.updates,model.updates);assert.match(html,/id="updates-trigger"/);assert.match(html,/id="updates-copy-range"/);assert.match(html,/function formatUpdatesMarkdown/);}
+  for(const view of ['review','document','prototype']){const html=await standalone(bundle,{view});const boot=JSON.parse(html.match(/<script>globalThis\.YUANXING_BOOT=([\s\S]*?);<\/script>/)[1]);assert.deepEqual(boot.bundle.model.updates,model.updates);assert.match(html,/id="updates-trigger"/);assert.match(html,/function createUpdates/);}
 });
 
 test('本地工作台可以读取更新说明模块',async()=>{
@@ -122,7 +78,4 @@ test('命令行追加更新说明：校验页面、日期与标识，只改 upda
   await assert.rejects(run(['updates','add','--root',root,'--text','章节','--section','1.1 背景']),/--section 需搭配/);
   const listed=await run(['updates','list','--root',root,'--json']);assert.deepEqual(listed.map(u=>u.date),['2026-10-29','2026-01-02']);
   assert.equal(JSON.parse(await fs.readFile(file,'utf8')).updates.length,2);
-  const addition=await run(['updates','add','--root',root,'--text','新增规则','--date','2026-10-29','--time','10:30:05','--section','新增','--key','approval','--before','','--after','新增的原文']);
-  assert.equal(addition.time,'10:30:05');
-  assert.deepEqual(addition.changes,[{title:'新增',key:'approval',before:'',after:'新增的原文'}]);
 });

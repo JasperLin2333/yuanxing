@@ -18,7 +18,7 @@ node scripts/yuanxing.mjs serve --workspace <工作区.json> [--project 标识] 
 node scripts/yuanxing.mjs open [--root <项目目录> | --workspace <工作区.json>] [--project 标识] [--port 4318] [--reuse | --no-browser]
 node scripts/yuanxing.mjs desktop [--root <项目目录> | --workspace <工作区.json>]
 node scripts/yuanxing.mjs apply --root <目录> --base <修改前JSON> --model <修改后JSON>
-node scripts/yuanxing.mjs updates add --root <目录> --text <变更说明> [--date YYYY-MM-DD] [--time HH:MM[:SS]] [--section 章节或位置] [--key 规则标识] [--before 原文] [--after 新文] [--node 页面标识] [--label 跳转名称] [--id 标识]
+node scripts/yuanxing.mjs updates add --root <目录> --text <变更说明> [--date YYYY-MM-DD] [--section 章节或位置] [--before 原文] [--after 新文] [--node 页面标识] [--label 跳转名称] [--id 标识]
 node scripts/yuanxing.mjs updates list --root <目录> [--json]
 node scripts/yuanxing.mjs locate --root <目录> [--query 关键词或页面标识] [--module 模块标识] [--limit 6] [--json]
 node scripts/yuanxing.mjs check --root <目录>
@@ -36,11 +36,7 @@ function options(args){
   for(let i=0;i<args.length;i++){
     const value=args[i];if(!value.startsWith('--')){result._.push(value);continue;}
     const key=value.slice(2);if(['open','replace','diagram','json','reuse','no-browser'].includes(key))result[key]=true;
-    else{
-      const next=args[i+1],allowEmpty=key==='before'||key==='after';
-      if(next===undefined||next.startsWith('--')||!next&&!allowEmpty)throw new Error(`缺少 --${key} 的值`);
-      result[key]=args[++i];
-    }
+    else{if(!args[i+1]||args[i+1].startsWith('--'))throw new Error(`缺少 --${key} 的值`);result[key]=args[++i];}
   }return result;
 }
 function required(flags,key){if(!flags[key])throw new Error(`请指定 --${key}`);return flags[key];}
@@ -55,12 +51,9 @@ async function resolveOutputPath(target){
     catch(error){const next=path.dirname(parent);if(error.code!=='ENOENT'||next===parent)throw error;suffix.unshift(path.basename(parent));parent=next;}
   }
 }
-const padTimePart=value=>String(value).padStart(2,'0');
-const localDate=date=>[date.getFullYear(),padTimePart(date.getMonth()+1),padTimePart(date.getDate())].join('-');
-const localTime=date=>[date.getHours(),date.getMinutes(),date.getSeconds()].map(padTimePart).join(':');
+function today(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 function calendarDate(value){
-  const parsed=new Date(value+'T00:00:00Z');
-  const valid=/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(+parsed)&&parsed.toISOString().slice(0,10)===value;
+  const valid=/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
   if(!valid)throw new Error('日期应为有效的 YYYY-MM-DD');return value;
 }
 
@@ -172,29 +165,20 @@ export async function run(args,{sessionToken}={}){
   if(command==='updates'){
     const action=flags._[0];
     if(action==='list'){
-      const {orderedUpdates,updateStamp}=await import('../runtime/updates.mjs');
-      const updates=orderedUpdates(model.updates);
+      const updates=[...(model.updates||[])].sort((a,b)=>b.date.localeCompare(a.date));
       if(flags.json)console.log(JSON.stringify(updates,null,2));
-      else console.log(updates.length?updates.map(item=>`${updateStamp(item)}  ${item.text}${item.node?`  → ${item.label||model.nodes.find(n=>n.id===item.node)?.title||item.node}`:''}  (${item.id})`).join('\n'):'暂无更新说明');
+      else console.log(updates.length?updates.map(item=>`${item.date}  ${item.text}${item.node?`  → ${item.label||model.nodes.find(n=>n.id===item.node)?.title||item.node}`:''}  (${item.id})`).join('\n'):'暂无更新说明');
       return updates;
     }
     if(action!=='add')throw new Error('更新说明操作应为 add 或 list');
-    const now=new Date(),text=required(flags,'text').trim(),date=calendarDate(flags.date||localDate(now));
-    const time=flags.time??(flags.date?undefined:localTime(now));
-    if(!text)throw new Error('更新说明不能为空');
+    const text=required(flags,'text').trim(),date=calendarDate(flags.date||today());if(!text)throw new Error('更新说明不能为空');
     const id=identifier(flags.id||`update-${date}-${randomBytes(3).toString('hex')}`);
     if((model.updates||[]).some(item=>item.id===id))throw new Error('更新说明标识已存在');
     if(flags.node&&!model.nodes.some(n=>n.id===flags.node))throw new Error('关联页面不存在：'+flags.node);
     if(flags.section!==undefined&&!flags.before?.trim()&&!flags.after?.trim())throw new Error('--section 需搭配有内容的 --before 或 --after');
-    if(flags.key!==undefined&&!flags.before?.trim()&&!flags.after?.trim())throw new Error('--key 需搭配有内容的 --before 或 --after');
     // 最新记录放在最前；并行新增由共同基线逐项合并。
-    const change=(flags.before!==undefined||flags.after!==undefined)?[{
-      ...(flags.section?{title:flags.section}:{}),
-      ...(flags.key!==undefined?{key:flags.key}:{}),
-      ...(flags.before!==undefined?{before:flags.before}:{}),
-      ...(flags.after!==undefined?{after:flags.after}:{})
-    }]:null;
-    model.updates=[{id,date,...(time!==undefined?{time}:{}),text,...(flags.node?{node:flags.node}:{}),...(flags.label?{label:flags.label}:{}),...(change?{changes:change}:{})},...(model.updates||[])];
+    const change=(flags.before!==undefined||flags.after!==undefined)?[{...(flags.section?{title:flags.section}:{}),...(flags.before!==undefined?{before:flags.before}:{}),...(flags.after!==undefined?{after:flags.after}:{})}]:null;
+    model.updates=[{id,date,text,...(flags.node?{node:flags.node}:{}),...(flags.label?{label:flags.label}:{}),...(change?{changes:change}:{})},...(model.updates||[])];
     const errors=validate(model);if(errors.length)throw new Error(errors.join('；'));
     await store.save(model,revision,base);console.log(`已添加更新说明 ${id}`);return model.updates[0];
   }
