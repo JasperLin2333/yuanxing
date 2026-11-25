@@ -447,6 +447,16 @@ blockquote.doc-text[contenteditable="true"]:focus{background:#ebf7ef;border-left
 .updates-dialog[open]{display:flex;flex-direction:column}
 .updates-dialog::backdrop{background:#12182466}.updates-dialog header{display:flex;flex:none;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid #edf0f2}
 .updates-dialog h2{margin:0;font-size:18px}.updates-close{font-size:24px;line-height:1;color:#7c838b}
+.updates-range{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 24px;border-bottom:1px solid #edf0f2;font-size:13px}
+.updates-range[hidden]{display:none}
+.updates-range select{flex:1 1 190px;min-width:0;max-width:100%;min-height:32px;padding:4px 8px;border:1px solid #dfe4ea;border-radius:6px;background:#fff;color:#242831;font:inherit}
+.updates-copy{flex:none;min-height:24px;padding:2px 8px;color:#40505d;background:transparent;font-size:12px;line-height:1.4}
+.updates-copy:hover:not(:disabled){background:#f0f3f7;color:#1f252e}
+.updates-range .updates-copy{min-height:32px;padding:4px 10px;border:1px solid #dfe4ea;background:#fafbfc}
+.updates-time{margin-right:8px;color:#737d87;font-size:12px;font-variant-numeric:tabular-nums}
+.updates-copy-status{flex:none;margin:0;padding:8px 24px;color:#40505d;font-size:13px}
+.updates-copy-status:empty,.updates-copy-text[hidden]{display:none}
+.updates-copy-text{flex:none;min-height:76px;margin:0 24px 14px;padding:8px;border:1px solid #dfe4ea;border-radius:6px;color:#242831}
 .updates-content{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:20px 24px 24px;scrollbar-width:thin;scrollbar-color:#D3DAE0 transparent}
 .updates-content::-webkit-scrollbar{width:8px}.updates-content::-webkit-scrollbar-track{background:transparent}.updates-content::-webkit-scrollbar-thumb{background:#D3DAE0;border:2px solid transparent;border-radius:4px;background-clip:padding-box}
 .updates-content section+section{margin-top:24px}.updates-content h3{margin:0 0 12px;font-size:14px;color:#737d87}
@@ -469,7 +479,7 @@ blockquote.doc-text[contenteditable="true"]:focus{background:#ebf7ef;border-left
 .updates-diff-sign{flex:none;width:14px;text-align:center;font-weight:700;opacity:.8}
 .updates-diff-text{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .updates-empty{margin:0;color:#737d87;font-size:14px}
-@media(max-width:720px){.updates-trigger{font-size:12px;padding:4px}.updates-content{padding:16px}}
+@media(max-width:720px){.updates-trigger{font-size:12px;padding:4px}.updates-content,.updates-range{padding:12px 16px}}
 
 /* 项目、产品、节点类型与缩放使用统一的选择组件。 */
 .yx-select{position:relative;min-width:0}

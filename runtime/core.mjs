@@ -663,7 +663,22 @@ export function validate(model) {
     if(!Array.isArray(model.updates))errors.push('更新说明格式不正确');
     else for(const update of model.updates){
       if(!update||typeof update!=='object'||Array.isArray(update)||typeof update.id!=='string'||!update.id||seen.has(update.id)||typeof update.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(update.date)||typeof update.text!=='string'||!update.text.trim()||update.node!==undefined&&typeof update.node!=='string'||update.label!==undefined&&typeof update.label!=='string')errors.push('更新说明格式不正确');
-      if(update?.changes!==undefined&&(!Array.isArray(update.changes)||!update.changes.length||update.changes.some(c=>!c||typeof c!=='object'||Array.isArray(c)||c.title!==undefined&&typeof c.title!=='string'||c.before!==undefined&&typeof c.before!=='string'||c.after!==undefined&&typeof c.after!=='string'||!c.before?.trim()&&!c.after?.trim())))errors.push('更新说明格式不正确');
+      if(update?.time!==undefined&&(typeof update.time!=='string'||!/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(update.time)))errors.push('更新说明时间格式不正确');
+      if(update?.changes!==undefined){
+        const keys=new Set();
+        const invalid=change=>{
+          if(!change||typeof change!=='object'||Array.isArray(change))return true;
+          if(change.key!==undefined){
+            if(typeof change.key!=='string'||!change.key.trim()||keys.has(change.key))return true;
+            keys.add(change.key);
+          }
+          return change.title!==undefined&&typeof change.title!=='string'
+            ||change.before!==undefined&&typeof change.before!=='string'
+            ||change.after!==undefined&&typeof change.after!=='string'
+            ||!change.before?.trim()&&!change.after?.trim();
+        };
+        if(!Array.isArray(update.changes)||!update.changes.length||update.changes.some(invalid))errors.push('更新说明格式不正确');
+      }
       if(update?.id)seen.add(update.id);
     }
   }

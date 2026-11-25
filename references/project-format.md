@@ -97,22 +97,25 @@
   {
     "id": "update-2026-01-01-expert",
     "date": "2026-01-01",
+    "time": "14:30",
     "text": "创建专家时增加处理中状态。",
     "changes": [
-      {"title": "3.1 创建专家交互", "before": "点击提交后直接返回列表。", "after": "点击提交后进入处理中状态，完成后自动进入详情。"}
+      {"key": "expert-create-submit", "title": "3.1 创建专家交互", "before": "点击提交后直接返回列表。", "after": "点击提交后进入处理中状态，完成后自动进入详情。"}
     ]
   }
 ]
 ```
 
-每项使用项目内唯一稳定 `id`、`YYYY-MM-DD` 日期和 `text`；可选 `changes` 数组记录轻量改前/改后对比（每项含可选 `title` 章节或位置、`before` 修改前原文与 `after` 修改后内容，界面默认折叠并支持原地展开红绿对照）；仍兼容历史 `node`/`label` 字段。Agent 按下方并行编辑方法从基线追加记录，保留用户及其他 Agent 的现有修改。
+每批记录使用项目内唯一稳定 `id`、`YYYY-MM-DD` 日期和 `text`。同日多批可用 `time`（`HH:MM` 或 `HH:MM:SS`）区分；旧记录可只带日期。可选 `changes` 中用 `title` 标出章节或位置，`before` 和 `after` 保留两版完整原文及 Markdown 格式。空字符串表示该版无正文，省略字段表示当时没有记录。用可选 `key` 标识一条规则，在后续批次沿用同一标识。历史 `node` 和 `label` 继续可读。
+
+区间复制以选中的交付完成后为起点，复制至当前最新记录。有相同 `key` 的改动合并起点和终点，有完整前后文、章节标题相同且原文首尾明确衔接的旧记录也可合并。改回起点的规则不列入区间结果，原历史和单次复制仍保留每次改动。
 
 ```sh
-node "<Skill目录>/scripts/yuanxing.mjs" updates add --root "<项目目录>" --text "创建专家时增加处理中状态。" --section "3.1 创建专家交互" --before "点击提交后直接返回列表。" --after "点击提交后进入处理中状态，完成后自动进入详情。"
+node "<Skill目录>/scripts/yuanxing.mjs" updates add --root "<项目目录>" --text "创建专家时增加处理中状态。" --key expert-create-submit --section "3.1 创建专家交互" --before "点击提交后直接返回列表。" --after "点击提交后进入处理中状态，完成后自动进入详情。"
 node "<Skill目录>/scripts/yuanxing.mjs" updates list --root "<项目目录>"
 ```
 
-`updates add` 默认使用本地当天日期并生成唯一 `id`，可用 `--date`、`--id` 指定。用 `--before` 或 `--after` 提供对比内容，可用 `--section` 给对比标注章节。命令通过共同基线追加一条记录。修改或删除已有记录时，按下方并行编辑方法使用 `apply`。
+`updates add` 默认记录本地日期和时间并生成唯一 `id`。补录旧批次可指定 `--date`，已知时间用 `--time`，标识可用 `--id` 指定。用 `--section`、`--key`、`--before` 和 `--after` 写入单项对照。单批含多项变更时用共同基线与 `apply` 一次保存。修改或删除已有记录也用 `apply`。
 
 ## 普通批注
 

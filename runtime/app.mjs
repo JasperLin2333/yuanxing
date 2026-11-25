@@ -51,7 +51,7 @@ const experienceSelect=createSelect({label:'选择产品或平台',variant:'yx-s
 document.body.classList.toggle('offline-share',originalReadonly);
 const extensionHost={getState:()=>({model,frames,current,mode,pageScale,experience,n:node(current)}),node,openNode,measure,visibleRect,renderOverlays,renderInspector,download,exitExperience};
 const projectExtension=createProjectExtension(extensionHost);
-const updatesView=createUpdates({getModel:()=>model});
+const updatesView=createUpdates({getModel:()=>model,copy:copyText});
 document.body.classList.toggle('declarative-pages',!!projectExtension?.declarative);
 const library=createLibrary({getModel:()=>model,getModule:()=>moduleId,getCurrent:()=>current,getSelected:()=>selected,getRecycleOpen:()=>recycleOpen,openRecycle,readonly,locateNode,selectModule,addModule,removeModule,moveModule});
 const libraryStyle=document.createElement('style');libraryStyle.textContent=libraryStyles+(projectExtension?.styles||'');document.head.append(libraryStyle);
@@ -940,12 +940,24 @@ function selectedHandoff(){
   if(!devMode||!devElement)throw new Error('请先选择一个 UI 区域。');const n=node(current);
   return {snippet:collectHandoff(devElement),context:{project:model.title,module:model.modules.find(m=>m.id===n.module)?.title||n.module,title:n.title,id:n.id,path:'artifact/'+n.path,description:explanationText(n),annotations:model.annotations.filter(a=>a.node===n.id),...projectExtension?.handoffContext?.(n)}};
 }
-async function copyHandoff(text){
+async function copyText(text,parent=document.body){
   if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return;}catch{}}
-  const field=document.createElement('textarea');field.value=text;field.style.cssText='position:fixed;opacity:0';document.body.append(field);field.select();try{if(!document.execCommand('copy'))throw new Error('复制失败，请下载片段 HTML。');}finally{field.remove();}
+  const previous=document.activeElement;
+  const field=document.createElement('textarea');
+  field.value=text;
+  field.readOnly=true;
+  field.style.cssText='position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+  parent.append(field);
+  field.select();
+  try{
+    if(!document.execCommand('copy'))throw new Error('复制失败，请下载片段 HTML。');
+  }finally{
+    field.remove();
+    previous?.focus({preventScroll:true});
+  }
 }
 async function action(name){
-  switch(name){case 'document':openDocument();break;case 'export-document':await exportFile('document');break;case 'developer-mode':toggleDeveloperMode();break;case 'open-guide':if($('#handoff-menu'))$('#handoff-menu').open=false;$('#guide-dialog')?.showModal();break;case 'close-guide':$('#guide-dialog')?.close();break;case 'handoff-copy':{const {snippet,context}=selectedHandoff();await copyHandoff(handoffPrompt(snippet,context));break;}case 'handoff-html':await copyHandoff(selectedHandoff().snippet.html);break;case 'handoff-download':{const {snippet,context}=selectedHandoff();download(handoffDocument(snippet,context),(context.title+'-片段.html').replace(/[\\/:*?"<>|]/g,'-'),'text/html');break;}case 'experience':if(devMode)toggleDeveloperMode(false);if(!experience)startExperience();break;case 'experience-exit':exitExperience();break;case 'replace-image':chooseImageReplacement($('#node-image-menu').dataset.node);break;case 'replace-current-image':chooseImageReplacement(current);break;case 'confirm-image-replacement':{const pending=pendingImageReplacement;if(readonly||!pending)break;$('#image-replace-dialog').close();pendingImageReplacement=null;if(node(pending.id)?.path!==pending.path){notice('当前图片已改变，请重新粘贴后替换。');break;}await upload(pending.files,{replacement:pending.id,expectedPath:pending.path});break;}case 'cancel-image-replacement':$('#image-replace-dialog').close();pendingImageReplacement=null;break;case 'export-menu':exportMenu();break;
+  switch(name){case 'document':openDocument();break;case 'export-document':await exportFile('document');break;case 'developer-mode':toggleDeveloperMode();break;case 'open-guide':if($('#handoff-menu'))$('#handoff-menu').open=false;$('#guide-dialog')?.showModal();break;case 'close-guide':$('#guide-dialog')?.close();break;case 'handoff-copy':{const {snippet,context}=selectedHandoff();await copyText(handoffPrompt(snippet,context));break;}case 'handoff-html':await copyText(selectedHandoff().snippet.html);break;case 'handoff-download':{const {snippet,context}=selectedHandoff();download(handoffDocument(snippet,context),(context.title+'-片段.html').replace(/[\\/:*?"<>|]/g,'-'),'text/html');break;}case 'experience':if(devMode)toggleDeveloperMode(false);if(!experience)startExperience();break;case 'experience-exit':exitExperience();break;case 'replace-image':chooseImageReplacement($('#node-image-menu').dataset.node);break;case 'replace-current-image':chooseImageReplacement(current);break;case 'confirm-image-replacement':{const pending=pendingImageReplacement;if(readonly||!pending)break;$('#image-replace-dialog').close();pendingImageReplacement=null;if(node(pending.id)?.path!==pending.path){notice('当前图片已改变，请重新粘贴后替换。');break;}await upload(pending.files,{replacement:pending.id,expectedPath:pending.path});break;}case 'cancel-image-replacement':$('#image-replace-dialog').close();pendingImageReplacement=null;break;case 'export-menu':exportMenu();break;
     case 'undo':if(!readonly&&history.past.length){model=history.undo(model);dirty=true;selected=null;updateHistoryButtons();scheduleSave();renderAll();}break;
     case 'fit':fit();break;case 'zoom-in':zoom(1.15);break;case 'zoom-out':zoom(1/1.15);break;
     case 'panel-sidebar':togglePanel('sidebar');break;case 'panel-inspector':togglePanel('inspector');break;
